@@ -1,0 +1,102 @@
+﻿<Window x:Class="DynamometerGUI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ScottPlot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
+        Title="Dynamometer Control Panel" Height="800" Width="1100">
+    <DockPanel Margin="10">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+            <Image Source="Dynamometer Logo.jpg" Width="80" Height="80" Margin="0,0,30,0"/>
+            
+            <StackPanel Orientation="Vertical" Margin="0,0,30,0">
+                <TextBlock Text="Manual Control" FontWeight="Bold" Margin="0,0,0,5"/>
+                <StackPanel Orientation="Horizontal">
+                    <Button Name="BtnStart" Content="Start" Width="60" Height="25" Margin="0,0,5,0" Click="BtnStart_Click"/>
+                    <Button Name="BtnStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Click="BtnStop_Click"/>
+                    <Button Name="BtnRecord" Content="Record" Width="70" Height="25" Margin="0,0,5,0" Click="BtnRecord_Click"/>
+                </StackPanel>
+                <TextBlock Name="TxtTimer" Text="Time: 00:00:00.0" Margin="0,5,0,0" FontWeight="SemiBold"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Vertical">
+                <TextBlock Text="Thrust Unit Setting:" FontWeight="Bold" Margin="0,0,0,5"/>
+                <ComboBox Name="CmbThrustUnit" Width="100" HorizontalAlignment="Left" SelectionChanged="CmbThrustUnit_SelectionChanged">
+                    <ComboBoxItem Content="kgf" IsSelected="True"/>
+                    <ComboBoxItem Content="Newtons (N)"/>
+                </ComboBox>
+            </StackPanel>
+        </StackPanel>
+
+        <TabControl>
+            <TabItem Header="Single Propeller">
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                        <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Button Name="BtnTareTorqueFront1" Content="1. Tare Torque" Height="40" Margin="0,0,0,10" Click="BtnTareTorque_Click"/>
+                        <Button Name="BtnCalTorqueFront1" Content="2. Calibrate Torque (500g)" Height="40" Margin="0,0,0,20" Click="BtnCalTorque_Click"/>
+                        <Button Name="BtnTareThrustFront1" Content="3. Tare Thrust" Height="40" Margin="0,0,0,10" Click="BtnTareThrust_Click"/>
+                        <Button Name="BtnCalThrustFront1" Content="4. Calibrate Thrust (500g)" Height="40" Margin="0,0,0,10" Click="BtnCalThrust_Click"/>
+                    </StackPanel>
+
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <ScottPlot:WpfPlot Name="PlotFrontThrustSingle" Grid.Row="0" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontTorqueSingle" Grid.Row="1" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontRPMSingle" Grid.Row="2" Margin="2"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Contra Rotating Propellers">
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                        <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Button Name="BtnTareTorqueFront2" Content="1. Tare Front Torque" Height="30" Margin="0,0,0,5" Click="BtnTareTorque_Click"/>
+                        <Button Name="BtnCalTorqueFront2" Content="2. Cal Front Torque (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalTorque_Click"/>
+                        <Button Name="BtnTareThrustFront2" Content="3. Tare Front Thrust" Height="30" Margin="0,0,0,5" Click="BtnTareThrust_Click"/>
+                        <Button Name="BtnCalThrustFront2" Content="4. Cal Front Thrust (500g)" Height="30" Margin="0,0,0,20" Click="BtnCalThrust_Click"/>
+
+                        <TextBlock Text="Back Stand" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Button Name="BtnTareTorqueBack" Content="5. Tare Back Torque" Height="30" Margin="0,0,0,5" Click="BtnTareTorqueBack_Click"/>
+                        <Button Name="BtnCalTorqueBack" Content="6. Cal Back Torque (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalTorqueBack_Click"/>
+                        <Button Name="BtnTareThrustBack" Content="7. Tare Back Thrust" Height="30" Margin="0,0,0,5" Click="BtnTareThrustBack_Click"/>
+                        <Button Name="BtnCalThrustBack" Content="8. Cal Back Thrust (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalThrustBack_Click"/>
+                    </StackPanel>
+
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ScottPlot:WpfPlot Name="PlotFrontThrustCRP" Grid.Row="0" Grid.Column="0" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontTorqueCRP" Grid.Row="1" Grid.Column="0" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontRPMCRP" Grid.Row="2" Grid.Column="0" Margin="2"/>
+                        
+                        <ScottPlot:WpfPlot Name="PlotBackThrustCRP" Grid.Row="0" Grid.Column="1" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotBackTorqueCRP" Grid.Row="1" Grid.Column="1" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotBackRPMCRP" Grid.Row="2" Grid.Column="1" Margin="2"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

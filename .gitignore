@@ -1,0 +1,7 @@
+# .NET GUI ignores
+bin/
+obj/
+.vs/
+
+# Arduino ignores
+build/
