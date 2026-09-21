@@ -2,44 +2,95 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ScottPlot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
-        Title="Dynamometer Control Panel" Height="800" Width="1100">
-    <DockPanel Margin="10">
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-            <Image Source="Dynamometer Logo.jpg" Width="80" Height="80" Margin="0,0,30,0"/>
-            
-            <StackPanel Orientation="Vertical" Margin="0,0,30,0">
-                <TextBlock Text="Manual Control" FontWeight="Bold" Margin="0,0,0,5"/>
-                <StackPanel Orientation="Horizontal">
-                    <Button Name="BtnStart" Content="Start" Width="60" Height="25" Margin="0,0,5,0" Click="BtnStart_Click"/>
-                    <Button Name="BtnStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Click="BtnStop_Click"/>
-                    <Button Name="BtnRecord" Content="Record" Width="70" Height="25" Margin="0,0,5,0" Click="BtnRecord_Click"/>
-                </StackPanel>
-                <TextBlock Name="TxtTimer" Text="Time: 00:00:00.0" Margin="0,5,0,0" FontWeight="SemiBold"/>
+        Name="WindowMain" Title="Dynamometer Control Panel" Height="800" Width="1200">
+    <Window.Resources>
+        <SolidColorBrush x:Key="MainBg" Color="#edf0f4" />
+        <SolidColorBrush x:Key="MainFg" Color="Black" />
+        <SolidColorBrush x:Key="BtnBg" Color="#D0D9E4" />
+        
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource BtnBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
+            <Setter Property="BorderBrush" Value="Gray"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="5">
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Image Grid.Column="0" Source="Dynamometer Logo.jpg" Width="140" Height="140" Margin="0,0,15,0" Stretch="Uniform"/>
+
+            <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,20,0" HorizontalAlignment="Right">
+                <TextBlock Text="Live Data: Inputs" FontWeight="Bold" Margin="0,0,0,5"/>
+                <TextBlock Name="TxtVoltage" Text="Voltage: 0.00 V" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtCurrent" Text="Current: 0.00 A" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtInputThrottle1" Text="Front ESC Throttle: 0.0000" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtInputThrottle2" Text="Back ESC Throttle: 0.0000" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtRPM" Text="RPM: 0"/>
             </StackPanel>
 
-            <StackPanel Orientation="Vertical">
-                <TextBlock Text="Thrust Unit Setting:" FontWeight="Bold" Margin="0,0,0,5"/>
+            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,30,0" HorizontalAlignment="Right">
+                <TextBlock Text="Live Data: Derived" FontWeight="Bold" Margin="0,0,0,5"/>
+                <TextBlock Name="TxtElecPower" Text="Elec Power: 0.00 W" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtMechEff" Text="Mech Eff: 0.0 %" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtElecEff" Text="Elec Eff: 0.0 %"/>
+            </StackPanel>
+
+            <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right">
+                <TextBlock Text="Theme:" FontWeight="Bold" Margin="0,0,0,2"/>
+                <ComboBox Name="CmbTheme" Width="100" HorizontalAlignment="Left" Margin="0,0,0,10" SelectionChanged="CmbTheme_SelectionChanged">
+                    <ComboBoxItem Content="Light" IsSelected="True"/>
+                    <ComboBoxItem Content="Dark"/>
+                </ComboBox>
+
+                <TextBlock Text="Thrust Unit:" FontWeight="Bold" Margin="0,0,0,2"/>
                 <ComboBox Name="CmbThrustUnit" Width="100" HorizontalAlignment="Left" SelectionChanged="CmbThrustUnit_SelectionChanged">
                     <ComboBoxItem Content="kgf" IsSelected="True"/>
                     <ComboBoxItem Content="Newtons (N)"/>
                 </ComboBox>
             </StackPanel>
-        </StackPanel>
+        </Grid>
 
-        <TabControl>
+        <TabControl Background="Transparent">
             <TabItem Header="Single Propeller">
-                <Grid Margin="0,10,0,0">
+                <Grid Margin="0,5,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="220"/> 
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
-                    <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                    <StackPanel Grid.Column="0" Margin="0,0,15,0">
                         <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <Button Name="BtnTareTorqueFront1" Content="1. Tare Torque" Height="40" Margin="0,0,0,10" Click="BtnTareTorque_Click"/>
-                        <Button Name="BtnCalTorqueFront1" Content="2. Calibrate Torque (500g)" Height="40" Margin="0,0,0,20" Click="BtnCalTorque_Click"/>
-                        <Button Name="BtnTareThrustFront1" Content="3. Tare Thrust" Height="40" Margin="0,0,0,10" Click="BtnTareThrust_Click"/>
-                        <Button Name="BtnCalThrustFront1" Content="4. Calibrate Thrust (500g)" Height="40" Margin="0,0,0,10" Click="BtnCalThrust_Click"/>
+                        <Button Name="BtnTareTorqueFront1" Content="1. Tare Torque" Height="30" Margin="0,0,0,5" Click="BtnTareTorque_Click"/>
+                        <Button Name="BtnCalTorqueFront1" Content="2. Calibrate Torque (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalTorque_Click"/>
+                        <Button Name="BtnTareThrustFront1" Content="3. Tare Thrust" Height="30" Margin="0,0,0,5" Click="BtnTareThrust_Click"/>
+                        <Button Name="BtnCalThrustFront1" Content="4. Calibrate Thrust (500g)" Height="30" Margin="0,0,0,20" Click="BtnCalThrust_Click"/>
+
+                        <Separator Background="Gray" Margin="0,0,0,15"/>
+
+                        <TextBlock Text="Manual Control" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <CheckBox Name="ChkActivateSingle" Content="Activate" Margin="0,0,0,10" Checked="ChkActivateSingle_Checked" Unchecked="ChkActivateSingle_Unchecked"/>
+                        
+                        <TextBlock Text="Throttle" Margin="0,0,0,2"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
+                            <Slider Name="SldThrottleSingle" Width="100" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleSingle_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False"/>
+                            <TextBox Name="TxtThrottleValueSingle" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
+                        </StackPanel>
+                        
+                        <Button Name="BtnRecordSingle" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" Click="BtnRecord_Click"/>
+                        <TextBlock Name="TxtTimerSingle" Text="Time: 00:00:00.000" FontWeight="SemiBold"/>
                     </StackPanel>
 
                     <Grid Grid.Column="1">
@@ -48,33 +99,55 @@
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <ScottPlot:WpfPlot Name="PlotFrontThrustSingle" Grid.Row="0" Margin="2"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontTorqueSingle" Grid.Row="1" Margin="2"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontRPMSingle" Grid.Row="2" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontThrustSingle" Grid.Row="0" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontTorqueSingle" Grid.Row="1" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontRPMSingle" Grid.Row="2" Margin="1"/>
                     </Grid>
                 </Grid>
             </TabItem>
 
             <TabItem Header="Contra Rotating Propellers">
-                <Grid Margin="0,10,0,0">
+                <Grid Margin="0,5,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
-                    <StackPanel Grid.Column="0" Margin="0,0,10,0">
-                        <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <Button Name="BtnTareTorqueFront2" Content="1. Tare Front Torque" Height="30" Margin="0,0,0,5" Click="BtnTareTorque_Click"/>
-                        <Button Name="BtnCalTorqueFront2" Content="2. Cal Front Torque (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalTorque_Click"/>
-                        <Button Name="BtnTareThrustFront2" Content="3. Tare Front Thrust" Height="30" Margin="0,0,0,5" Click="BtnTareThrust_Click"/>
-                        <Button Name="BtnCalThrustFront2" Content="4. Cal Front Thrust (500g)" Height="30" Margin="0,0,0,20" Click="BtnCalThrust_Click"/>
+                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,15,0">
+                        <StackPanel>
+                            <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <Button Name="BtnTareTorqueFront2" Content="1. Tare Front Torque" Height="25" Margin="0,0,0,2" Click="BtnTareTorque_Click"/>
+                            <Button Name="BtnCalTorqueFront2" Content="2. Calibrate Front Torque (500g)" Height="25" Margin="0,0,0,8" Click="BtnCalTorque_Click"/>
+                            <Button Name="BtnTareThrustFront2" Content="3. Tare Front Thrust" Height="25" Margin="0,0,0,2" Click="BtnTareThrust_Click"/>
+                            <Button Name="BtnCalThrustFront2" Content="4. Calibrate Front Thrust (500g)" Height="25" Margin="0,0,0,15" Click="BtnCalThrust_Click"/>
 
-                        <TextBlock Text="Back Stand" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <Button Name="BtnTareTorqueBack" Content="5. Tare Back Torque" Height="30" Margin="0,0,0,5" Click="BtnTareTorqueBack_Click"/>
-                        <Button Name="BtnCalTorqueBack" Content="6. Cal Back Torque (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalTorqueBack_Click"/>
-                        <Button Name="BtnTareThrustBack" Content="7. Tare Back Thrust" Height="30" Margin="0,0,0,5" Click="BtnTareThrustBack_Click"/>
-                        <Button Name="BtnCalThrustBack" Content="8. Cal Back Thrust (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalThrustBack_Click"/>
-                    </StackPanel>
+                            <TextBlock Text="Back Stand" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <Button Name="BtnTareTorqueBack" Content="5. Tare Back Torque" Height="25" Margin="0,0,0,2" Click="BtnTareTorqueBack_Click"/>
+                            <Button Name="BtnCalTorqueBack" Content="6. Calibrate Back Torque (500g)" Height="25" Margin="0,0,0,8" Click="BtnCalTorqueBack_Click"/>
+                            <Button Name="BtnTareThrustBack" Content="7. Tare Back Thrust" Height="25" Margin="0,0,0,2" Click="BtnTareThrustBack_Click"/>
+                            <Button Name="BtnCalThrustBack" Content="8. Calibrate Back Thrust (500g)" Height="25" Margin="0,0,0,15" Click="BtnCalThrustBack_Click"/>
+
+                            <Separator Background="Gray" Margin="0,0,0,15"/>
+
+                            <TextBlock Text="Manual Control" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <CheckBox Name="ChkActivateCRP" Content="Activate" Margin="0,0,0,10" Checked="ChkActivateCRP_Checked" Unchecked="ChkActivateCRP_Unchecked"/>
+                            
+                            <TextBlock Text="Front Throttle" Margin="0,0,0,2"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Slider Name="SldThrottleFrontCRP" Width="100" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleFrontCRP_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False"/>
+                                <TextBox Name="TxtThrottleValueFrontCRP" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Back Throttle" Margin="0,0,0,2"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
+                                <Slider Name="SldThrottleBackCRP" Width="100" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleBackCRP_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False"/>
+                                <TextBox Name="TxtThrottleValueBackCRP" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
+                            </StackPanel>
+                            
+                            <Button Name="BtnRecordCRP" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" Click="BtnRecord_Click"/>
+                            <TextBlock Name="TxtTimerCRP" Text="Time: 00:00:00.000" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <Grid Grid.Column="1">
                         <Grid.RowDefinitions>
@@ -87,13 +160,13 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <ScottPlot:WpfPlot Name="PlotFrontThrustCRP" Grid.Row="0" Grid.Column="0" Margin="2"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontTorqueCRP" Grid.Row="1" Grid.Column="0" Margin="2"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontRPMCRP" Grid.Row="2" Grid.Column="0" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontThrustCRP" Grid.Row="0" Grid.Column="0" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontTorqueCRP" Grid.Row="1" Grid.Column="0" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontRPMCRP" Grid.Row="2" Grid.Column="0" Margin="1"/>
                         
-                        <ScottPlot:WpfPlot Name="PlotBackThrustCRP" Grid.Row="0" Grid.Column="1" Margin="2"/>
-                        <ScottPlot:WpfPlot Name="PlotBackTorqueCRP" Grid.Row="1" Grid.Column="1" Margin="2"/>
-                        <ScottPlot:WpfPlot Name="PlotBackRPMCRP" Grid.Row="2" Grid.Column="1" Margin="2"/>
+                        <ScottPlot:WpfPlot Name="PlotBackThrustCRP" Grid.Row="0" Grid.Column="1" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotBackTorqueCRP" Grid.Row="1" Grid.Column="1" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotBackRPMCRP" Grid.Row="2" Grid.Column="1" Margin="1"/>
                     </Grid>
                 </Grid>
             </TabItem>
