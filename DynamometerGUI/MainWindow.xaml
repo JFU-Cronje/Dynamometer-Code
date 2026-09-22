@@ -124,8 +124,18 @@
                             <Trigger Property="IsSelected" Value="False">
                                 <Setter TargetName="border" Property="Background" Value="{DynamicResource BtnBg}"/>
                             </Trigger>
-                            <Trigger SourceName="border" Property="IsMouseOver" Value="True">
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition SourceName="border" Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsSelected" Value="False"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
                                 <Setter TargetName="border" Property="Background" Value="{DynamicResource HoverBtnBg}"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource DisabledBtnBg}"/>
+                                <Setter TargetName="content" Property="TextBlock.Foreground" Value="Gray"/>
+                                <Setter TargetName="border" Property="Opacity" Value="0.6"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -262,7 +272,7 @@
             <TabItem Name="TabSingle" Header="Single Propeller">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220"/> 
+                        <ColumnDefinition Width="280"/> 
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
@@ -283,8 +293,12 @@
                         
                         <TextBlock Text="Throttle" Margin="0,0,0,2"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
-                            <Slider Name="SldThrottleSingle" Width="100" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleSingle_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False"/>
-                            <TextBox Name="TxtThrottleValueSingle" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
+                            <Slider Name="SldThrottleSingle" Width="140" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleSingle_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False">
+                                <Slider.LayoutTransform>
+                                    <ScaleTransform ScaleX="1.3" ScaleY="1.3"/>
+                                </Slider.LayoutTransform>
+                            </Slider>
+                            <TextBox Name="TxtThrottleValueSingle" Text="0.0000" Width="55" Margin="15,0,0,0" IsReadOnly="True" TextAlignment="Center" VerticalAlignment="Center"/>
                         </StackPanel>
                         
                         <Button Name="BtnRecordSingle" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" IsEnabled="False" Click="BtnRecord_Click"/>
@@ -307,7 +321,7 @@
             <TabItem Name="TabCRP" Header="Contra Rotating Propellers">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="280"/> 
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
@@ -334,14 +348,22 @@
                             
                             <TextBlock Text="Front Throttle" Margin="0,0,0,2"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Slider Name="SldThrottleFrontCRP" Width="100" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleFrontCRP_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False"/>
-                                <TextBox Name="TxtThrottleValueFrontCRP" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
+                                <Slider Name="SldThrottleFrontCRP" Width="140" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleFrontCRP_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False">
+                                    <Slider.LayoutTransform>
+                                        <ScaleTransform ScaleX="1.3" ScaleY="1.3"/>
+                                    </Slider.LayoutTransform>
+                                </Slider>
+                                <TextBox Name="TxtThrottleValueFrontCRP" Text="0.0000" Width="55" Margin="15,0,0,0" IsReadOnly="True" TextAlignment="Center" VerticalAlignment="Center"/>
                             </StackPanel>
 
                             <TextBlock Text="Back Throttle" Margin="0,0,0,2"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
-                                <Slider Name="SldThrottleBackCRP" Width="100" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleBackCRP_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False"/>
-                                <TextBox Name="TxtThrottleValueBackCRP" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
+                                <Slider Name="SldThrottleBackCRP" Width="140" Minimum="0" Maximum="0.05" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleBackCRP_ValueChanged" TickFrequency="0.0001" LargeChange="0" SmallChange="0.0001" IsMoveToPointEnabled="False">
+                                    <Slider.LayoutTransform>
+                                        <ScaleTransform ScaleX="1.3" ScaleY="1.3"/>
+                                    </Slider.LayoutTransform>
+                                </Slider>
+                                <TextBox Name="TxtThrottleValueBackCRP" Text="0.0000" Width="55" Margin="15,0,0,0" IsReadOnly="True" TextAlignment="Center" VerticalAlignment="Center"/>
                             </StackPanel>
                             
                             <Button Name="BtnRecordCRP" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" IsEnabled="False" Click="BtnRecord_Click"/>
@@ -372,13 +394,13 @@
             </TabItem>
 
             <TabItem Name="TabLogs" Header="Test Logs">
-                <Grid Margin="10">
+                <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="200"/>
+                        <ColumnDefinition Width="280"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
-                    <Grid Grid.Column="0" Margin="0,0,15,0">
+                    <Grid Grid.Column="0" Margin="10,0,15,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
@@ -398,7 +420,7 @@
                         <Button Name="BtnOpenLogsFolder" Grid.Row="2" Content="Open Folder in Explorer" Height="30" Click="BtnOpenLogsFolder_Click"/>
                     </Grid>
                     
-                    <DataGrid Name="DataGridLogs" Grid.Column="1" AutoGenerateColumns="True" IsReadOnly="True"/>
+                    <DataGrid Name="DataGridLogs" Grid.Column="1" AutoGenerateColumns="True" IsReadOnly="True" Margin="1"/>
                 </Grid>
             </TabItem>
         </TabControl>

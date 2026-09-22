@@ -255,8 +255,9 @@ namespace DynamometerGUI
             {
                 if (TabLogs.IsSelected)
                 {
-                    PanelLiveDataInputsRoot.Visibility = Visibility.Collapsed;
-                    PanelLiveDataDerivedRoot.Visibility = Visibility.Collapsed;
+                    // Use Hidden instead of Collapsed to reserve the layout space and prevent vertical jumping
+                    PanelLiveDataInputsRoot.Visibility = Visibility.Hidden;
+                    PanelLiveDataDerivedRoot.Visibility = Visibility.Hidden;
                 }
                 else
                 {
