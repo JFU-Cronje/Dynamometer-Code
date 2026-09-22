@@ -311,9 +311,9 @@
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <ScottPlot:WpfPlot Name="PlotFrontThrustSingle" Grid.Row="0" Margin="1" IsHitTestVisible="False"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontTorqueSingle" Grid.Row="1" Margin="1" IsHitTestVisible="False"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontRPMSingle" Grid.Row="2" Margin="1" IsHitTestVisible="False"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontThrustSingle" Grid.Row="0" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontTorqueSingle" Grid.Row="1" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontRPMSingle" Grid.Row="2" Margin="1"/>
                     </Grid>
                 </Grid>
             </TabItem>
@@ -382,13 +382,13 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <ScottPlot:WpfPlot Name="PlotFrontThrustCRP" Grid.Row="0" Grid.Column="0" Margin="1" IsHitTestVisible="False"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontTorqueCRP" Grid.Row="1" Grid.Column="0" Margin="1" IsHitTestVisible="False"/>
-                        <ScottPlot:WpfPlot Name="PlotFrontRPMCRP" Grid.Row="2" Grid.Column="0" Margin="1" IsHitTestVisible="False"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontThrustCRP" Grid.Row="0" Grid.Column="0" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontTorqueCRP" Grid.Row="1" Grid.Column="0" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotFrontRPMCRP" Grid.Row="2" Grid.Column="0" Margin="1"/>
                         
-                        <ScottPlot:WpfPlot Name="PlotBackThrustCRP" Grid.Row="0" Grid.Column="1" Margin="1" IsHitTestVisible="False"/>
-                        <ScottPlot:WpfPlot Name="PlotBackTorqueCRP" Grid.Row="1" Grid.Column="1" Margin="1" IsHitTestVisible="False"/>
-                        <ScottPlot:WpfPlot Name="PlotBackRPMCRP" Grid.Row="2" Grid.Column="1" Margin="1" IsHitTestVisible="False"/>
+                        <ScottPlot:WpfPlot Name="PlotBackThrustCRP" Grid.Row="0" Grid.Column="1" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotBackTorqueCRP" Grid.Row="1" Grid.Column="1" Margin="1"/>
+                        <ScottPlot:WpfPlot Name="PlotBackRPMCRP" Grid.Row="2" Grid.Column="1" Margin="1"/>
                     </Grid>
                 </Grid>
             </TabItem>

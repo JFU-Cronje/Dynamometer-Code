@@ -30,6 +30,16 @@ namespace DynamometerGUI
         bool isRecording = false;
         bool isStopping = false;
         StreamWriter? csvWriter = null;
+        double thrust1, torque1, rpm1, volt1, curr1;
+        double thrust2, torque2, rpm2, volt2, curr2;
+        double pBatEsc1, pMech1, mechEff1;
+        double pBatEsc2, pMech2, mechEff2;
+
+        // Graph Loggers
+        ScottPlot.Plottables.DataLogger dlFrontThrustSingle = null!, dlFrontTorqueSingle = null!, dlFrontRPMSingle = null!;
+        ScottPlot.Plottables.DataLogger dlFrontThrustCRP = null!, dlFrontTorqueCRP = null!, dlFrontRPMCRP = null!;
+        ScottPlot.Plottables.DataLogger dlBackThrustCRP = null!, dlBackTorqueCRP = null!, dlBackRPMCRP = null!;
+        double liveGraphTime = 0;
 
         // Custom Directories
         string logDir = @"S:\Documents\1_Education\BEng (Mechatronics) @ SU\Y4S2\4_Mechatronic Project 478 - Skripsie\1_26894874_Cronje\10_Software\Dynamometer Code\DynamometerGUI\bin\DynoLogs";
@@ -51,8 +61,9 @@ namespace DynamometerGUI
             Directory.CreateDirectory(calDir);
 
             testTimer = new DispatcherTimer();
-            testTimer.Interval = TimeSpan.FromMilliseconds(10);
+            testTimer.Interval = TimeSpan.FromMilliseconds(50);
             testTimer.Tick += TestTimer_Tick;
+            testTimer.Start(); // Run continuously for live graphing
 
             stopHoldTimer = new DispatcherTimer();
             stopHoldTimer.Interval = TimeSpan.FromMilliseconds(50);
@@ -63,7 +74,12 @@ namespace DynamometerGUI
             LoadLogFiles();
             
             arduinoPort = new SerialPort("COM3", 115200);
-            try { arduinoPort.Open(); }
+            try 
+            {
+                 arduinoPort.DtrEnable = true;
+                 arduinoPort.Open();
+                 arduinoPort.DataReceived += ArduinoPort_DataReceived;
+            }
             catch { MessageBox.Show("Could not open COM3. Verify the Arduino Uno is plugged in."); }
         }
 
@@ -78,7 +94,12 @@ namespace DynamometerGUI
 
             foreach (var p in plots)
             {
-                p.Plot.Axes.SetLimitsX(0, 20);
+                p.Plot.Axes.SetLimitsX(0, 60);
+                
+                // Force X-axis to display 5-second intervals (approx 12 ticks over a 60s span)
+                var tickGen = new ScottPlot.TickGenerators.NumericAutomatic();
+                tickGen.TargetTickCount = 12;
+                p.Plot.Axes.Bottom.TickGenerator = tickGen;
                 
                 var anno = p.Plot.Add.Annotation("Time (s)", ScottPlot.Alignment.LowerRight);
                 anno.LabelBorderColor = ScottPlot.Colors.Transparent;
@@ -87,31 +108,159 @@ namespace DynamometerGUI
                 anno.LabelFontColor = ScottPlot.Colors.Gray;
             }
 
+            dlFrontThrustSingle = PlotFrontThrustSingle.Plot.Add.DataLogger();
+            dlFrontTorqueSingle = PlotFrontTorqueSingle.Plot.Add.DataLogger();
+            dlFrontRPMSingle = PlotFrontRPMSingle.Plot.Add.DataLogger();
+            
+            dlFrontThrustCRP = PlotFrontThrustCRP.Plot.Add.DataLogger();
+            dlFrontTorqueCRP = PlotFrontTorqueCRP.Plot.Add.DataLogger();
+            dlFrontRPMCRP = PlotFrontRPMCRP.Plot.Add.DataLogger();
+            
+            dlBackThrustCRP = PlotBackThrustCRP.Plot.Add.DataLogger();
+            dlBackTorqueCRP = PlotBackTorqueCRP.Plot.Add.DataLogger();
+            dlBackRPMCRP = PlotBackRPMCRP.Plot.Add.DataLogger();
+
+            var loggers = new[] { dlFrontThrustSingle, dlFrontTorqueSingle, dlFrontRPMSingle, 
+                                  dlFrontThrustCRP, dlFrontTorqueCRP, dlFrontRPMCRP, 
+                                  dlBackThrustCRP, dlBackTorqueCRP, dlBackRPMCRP };
+            
+            foreach (var l in loggers)
+            {
+                l.ManageAxisLimits = false; 
+            }
+
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
             PlotFrontThrustSingle.Plot.YLabel("Thrust (kgf)");
+            PlotFrontThrustSingle.Plot.Axes.SetLimitsY(-1, 5); 
+
             PlotFrontTorqueSingle.Plot.Title("Front Torque");
             PlotFrontTorqueSingle.Plot.YLabel("Torque (Nm)");
+            PlotFrontTorqueSingle.Plot.Axes.SetLimitsY(-0.1, 1);
+
             PlotFrontRPMSingle.Plot.Title("Front RPM");
             PlotFrontRPMSingle.Plot.YLabel("RPM");
+            PlotFrontRPMSingle.Plot.Axes.SetLimitsY(-500, 10000);
 
             PlotFrontThrustCRP.Plot.Title("Front Thrust");
             PlotFrontThrustCRP.Plot.YLabel("Thrust (kgf)");
+            PlotFrontThrustCRP.Plot.Axes.SetLimitsY(-1, 5);
+
             PlotFrontTorqueCRP.Plot.Title("Front Torque");
             PlotFrontTorqueCRP.Plot.YLabel("Torque (Nm)");
+            PlotFrontTorqueCRP.Plot.Axes.SetLimitsY(-0.1, 1);
+
             PlotFrontRPMCRP.Plot.Title("Front RPM");
             PlotFrontRPMCRP.Plot.YLabel("RPM");
+            PlotFrontRPMCRP.Plot.Axes.SetLimitsY(-500, 10000);
             
             PlotBackThrustCRP.Plot.Title("Back Thrust");
             PlotBackThrustCRP.Plot.YLabel("Thrust (kgf)");
+            PlotBackThrustCRP.Plot.Axes.SetLimitsY(-1, 5);
+
             PlotBackTorqueCRP.Plot.Title("Back Torque");
             PlotBackTorqueCRP.Plot.YLabel("Torque (Nm)");
+            PlotBackTorqueCRP.Plot.Axes.SetLimitsY(-0.1, 1);
+
             PlotBackRPMCRP.Plot.Title("Back RPM");
             PlotBackRPMCRP.Plot.YLabel("RPM");
+            PlotBackRPMCRP.Plot.Axes.SetLimitsY(-500, 10000);
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
             ApplyTitleBarTheme(CmbTheme.SelectedIndex == 1);
+        }
+
+        private void ArduinoPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            try
+            {
+                string line = arduinoPort.ReadLine().Trim();
+                string[] parts = line.Split(',');
+
+                if (parts.Length == 10)
+                {
+                    thrust1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
+                    torque1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                    rpm1 = double.Parse(parts[2], CultureInfo.InvariantCulture);
+                    volt1 = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                    curr1 = double.Parse(parts[4], CultureInfo.InvariantCulture);
+
+                    thrust2 = double.Parse(parts[5], CultureInfo.InvariantCulture);
+                    torque2 = double.Parse(parts[6], CultureInfo.InvariantCulture);
+                    rpm2 = double.Parse(parts[7], CultureInfo.InvariantCulture);
+                    volt2 = double.Parse(parts[8], CultureInfo.InvariantCulture);
+                    curr2 = double.Parse(parts[9], CultureInfo.InvariantCulture);
+
+                    // Derived calculations
+                    pBatEsc1 = volt1 * curr1;
+                    pMech1 = torque1 * rpm1 * (2.0 * Math.PI / 60.0);
+                    mechEff1 = pBatEsc1 > 0 ? (pMech1 / pBatEsc1) * 100.0 : 0;
+
+                    pBatEsc2 = volt2 * curr2;
+                    pMech2 = torque2 * rpm2 * (2.0 * Math.PI / 60.0);
+                    mechEff2 = pBatEsc2 > 0 ? (pMech2 / pBatEsc2) * 100.0 : 0;
+
+                    // Push updates to the UI thread
+                    Dispatcher.Invoke(() =>
+                    {
+                        liveGraphTime += 0.1; 
+
+                        double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
+                        double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
+
+                        dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
+                        dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
+                        dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
+                        
+                        dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
+                        dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
+                        dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
+                        
+                        dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
+                        dlBackTorqueCRP?.Add(liveGraphTime, torque2);
+                        dlBackRPMCRP?.Add(liveGraphTime, rpm2);
+
+                        // Center the X axis after 30s
+                        double minX = liveGraphTime < 30 ? 0 : liveGraphTime - 30;
+                        double maxX = liveGraphTime < 30 ? 60 : liveGraphTime + 30;
+
+                        var plots = new[] { PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle, PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP, PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP };
+                        var currentVals = new[] { displayThrust1, torque1, rpm1, displayThrust1, torque1, rpm1, displayThrust2, torque2, rpm2 };
+
+                        for (int i = 0; i < plots.Length; i++)
+                        {
+                            var p = plots[i];
+                            if (p != null)
+                            {
+                                p.Plot.Axes.SetLimitsX(minX, maxX);
+                                
+                                // Auto-expand Y-axis if data breaches the current visible boundaries
+                                var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
+                                if (currentVals[i] >= yRange.Max || currentVals[i] <= yRange.Min)
+                                {
+                                    p.Plot.Axes.AutoScaleY();
+                                }
+                            }
+                        }
+
+                        TxtFrontVoltage.Text = $"Voltage: {volt1:F2} V";
+                        TxtFrontCurrent.Text = $"Current: {curr1:F2} A";
+                        TxtFrontRPM.Text = $"RPM: {rpm1:F0}";
+                        TxtFrontPBatEsc.Text = $"P_BAT-ESC: {pBatEsc1:F2} W";
+                        TxtFrontMechPower.Text = $"Mech Power: {pMech1:F2} W";
+                        TxtFrontMechEff.Text = $"Mech Eff: {mechEff1:F1} %";
+
+                        TxtBackVoltage.Text = $"Voltage: {volt2:F2} V";
+                        TxtBackCurrent.Text = $"Current: {curr2:F2} A";
+                        TxtBackRPM.Text = $"RPM: {rpm2:F0}";
+                        TxtBackPBatEsc.Text = $"P_BAT-ESC: {pBatEsc2:F2} W";
+                        TxtBackMechPower.Text = $"Mech Power: {pMech2:F2} W";
+                        TxtBackMechEff.Text = $"Mech Eff: {mechEff2:F1} %";
+                    });
+                }
+            }
+            catch { }
         }
 
         private void ApplyTitleBarTheme(bool isDark)
@@ -127,35 +276,52 @@ namespace DynamometerGUI
 
         private void TestTimer_Tick(object? sender, EventArgs e)
         {
-            TimeSpan elapsed = DateTime.Now - startTime;
-            string timeFormat = $"Time: {elapsed:hh\\:mm\\:ss\\.fff}";
-            TxtTimerSingle.Text = timeFormat;
-            TxtTimerCRP.Text = timeFormat;
-
-            if (isRecording && csvWriter != null)
+            if (isRecording)
             {
-                if (elapsed.TotalSeconds >= nextLogInterval)
+                TimeSpan elapsed = DateTime.Now - startTime;
+                string timeFormat = $"Time: {elapsed:hh\\:mm\\:ss\\.fff}";
+                TxtTimerSingle.Text = timeFormat;
+                TxtTimerCRP.Text = timeFormat;
+
+                if (csvWriter != null && elapsed.TotalSeconds >= nextLogInterval)
                 {
                     TimeSpan exactLogTime = TimeSpan.FromSeconds(nextLogInterval);
                     string elapsedLogTime = exactLogTime.ToString(@"hh\:mm\:ss\.fff");
                     
                     double throttle1 = TabSingle.IsSelected ? SldThrottleSingle.Value : SldThrottleFrontCRP.Value;
-                    double throttle2 = TabSingle.IsSelected ? 0 : SldThrottleBackCRP.Value;
+                    double throttle2 = TabCRP.IsSelected ? SldThrottleBackCRP.Value : 0;
                     
                     string t1 = throttle1.ToString("F4", CultureInfo.InvariantCulture);
                     string t2 = throttle2.ToString("F4", CultureInfo.InvariantCulture);
+
+                    bool isCRP = TabCRP.IsSelected;
+                    double logThrust2 = isCRP ? thrust2 : 0;
+                    double logTorque2 = isCRP ? torque2 : 0;
+                    double logRpm2 = isCRP ? rpm2 : 0;
+                    double logVolt2 = isCRP ? volt2 : 0;
+                    double logCurr2 = isCRP ? curr2 : 0;
+                    double logPBatEsc2 = isCRP ? pBatEsc2 : 0;
+                    double logPMech2 = isCRP ? pMech2 : 0;
+                    double logMechEff2 = isCRP ? mechEff2 : 0;
                     
-                    csvWriter.WriteLine($"{elapsedLogTime},0,0,0,0,0,{t1},0,0,0,0,0,0,0,0,0,0,{t2},0,0,0,0,0");
+                    string csvLine = string.Format(CultureInfo.InvariantCulture, 
+                        "{0},{1:F3},{2:F3},{3:F0},{4:F2},{5:F2},{6},{7:F2},0.00,0.0,{8:F2},{9:F1},{10:F3},{11:F3},{12:F0},{13:F2},{14:F2},{15},{16:F2},0.00,0.0,{17:F2},{18:F1}",
+                        elapsedLogTime, 
+                        thrust1, torque1, rpm1, volt1, curr1, t1, pBatEsc1, pMech1, mechEff1,
+                        logThrust2, logTorque2, logRpm2, logVolt2, logCurr2, t2, logPBatEsc2, logPMech2, logMechEff2);
+
+                    csvWriter.WriteLine(csvLine);
                     nextLogInterval += 0.5;
                 }
             }
+
+            RefreshAllPlots();
         }
 
         private void StopRecording()
         {
             if (isRecording)
             {
-                testTimer.Stop();
                 isRecording = false;
                 BtnRecordSingle.Content = "Record";
                 BtnRecordCRP.Content = "Record";
@@ -472,11 +638,11 @@ namespace DynamometerGUI
             {
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
                 csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{timestamp}.csv"));
+                csvWriter.AutoFlush = true;
                 csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,P_BAT-ESC1,P_ESC-MOT1,ElecEff1,P_Mech1,MechEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,P_BAT-ESC2,P_ESC-MOT2,ElecEff2,P_Mech2,MechEff2");
                 
                 startTime = DateTime.Now;
                 nextLogInterval = 0.5;
-                testTimer.Start();
                 isRecording = true;
                 BtnRecordSingle.Content = "Stop Rec";
                 BtnRecordCRP.Content = "Stop Rec";
@@ -535,9 +701,17 @@ namespace DynamometerGUI
                 PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP 
             };
 
-            foreach (var p in plots)
+            var loggers = new[] 
+            { 
+                dlFrontThrustSingle, dlFrontTorqueSingle, dlFrontRPMSingle, 
+                dlFrontThrustCRP, dlFrontTorqueCRP, dlFrontRPMCRP, 
+                dlBackThrustCRP, dlBackTorqueCRP, dlBackRPMCRP 
+            };
+
+            for (int i = 0; i < plots.Length; i++)
             {
-                p.Plot.Axes.AutoScaleY();
+                var p = plots[i];
+                var l = loggers[i];
                 
                 if (isDark)
                 {
@@ -545,6 +719,8 @@ namespace DynamometerGUI
                     p.Plot.DataBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
                     p.Plot.Axes.Color(ScottPlot.Color.FromHex("#FFFFFF"));
                     p.Plot.Grid.MajorLineColor = ScottPlot.Color.FromHex("#444444");
+                    
+                    if (l != null) l.Color = ScottPlot.Color.FromHex("#FFC107"); // High-contrast amber
                 }
                 else
                 {
@@ -552,6 +728,8 @@ namespace DynamometerGUI
                     p.Plot.DataBackground.Color = ScottPlot.Colors.White;
                     p.Plot.Axes.Color(ScottPlot.Colors.Black);
                     p.Plot.Grid.MajorLineColor = ScottPlot.Color.FromHex("#DDDDDD");
+                    
+                    if (l != null) l.Color = ScottPlot.Colors.Blue;
                 }
             }
             

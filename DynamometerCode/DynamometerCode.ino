@@ -1,66 +1,60 @@
-#include "HX711.h"
-
-// Define Load Cell Objects
-HX711 thrustFront;
-HX711 torqueFront;
-HX711 thrustBack;
-HX711 torqueBack;
+float throttle1 = 0.0;
+float throttle2 = 0.0;
+unsigned long lastSendTime = 0;
 
 void setup() {
   Serial.begin(115200);
-  
-  // Initialize pins (DOUT, SCK)
-  thrustFront.begin(2, 3);
-  torqueFront.begin(4, 5);
-  thrustBack.begin(6, 7);
-  torqueBack.begin(8, 9);
-  
-  Serial.println("Dynamometer Load Cells Initialized");
+  Serial.println("Dynamometer Simulation Initialized");
 }
 
 void loop() {
-  // Listen for commands from the PC GUI
+  // 1. Listen for commands from the PC GUI
   if (Serial.available() > 0) {
-    char cmd = Serial.read();
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
     
-    switch (cmd) {
-      // 1. TARE TORQUE: PC sends 'A' before attaching the 500g weight
-      case 'A':
-        torqueFront.tare(20);
-        Serial.println("Front Torque Tared.");
-        break;
-        
-      // 2. CALIBRATE TORQUE: PC sends 'B' after attaching the 500g weight
-      case 'B':
-        long rawTorque = torqueFront.get_value(20);
-        // Calculate the scale factor for 500g
-        torqueFront.set_scale(rawTorque / 500.0); 
-        Serial.println("Front Torque Calibrated to 500g.");
-        break;
-        
-      // 3. TARE THRUST: PC sends 'C' with stand laid flat, no weight
-      case 'C':
-        thrustFront.tare(20);
-        Serial.println("Front Thrust Tared.");
-        break;
-        
-      // 4. CALIBRATE THRUST: PC sends 'D' with stand flat, 500g weight added
-      case 'D':
-        long rawThrust = thrustFront.get_value(20);
-        thrustFront.set_scale(rawThrust / 500.0);
-        Serial.println("Front Thrust Calibrated to 500g.");
-        break;
-        
-      // 5. PRINT DATA: PC sends 'P' to request a single reading of all sensors
-      case 'P':
-        Serial.print(thrustFront.get_units(5));
-        Serial.print(",");
-        Serial.print(torqueFront.get_units(5));
-        Serial.print(",");
-        Serial.print(thrustBack.get_units(5));
-        Serial.print(",");
-        Serial.println(torqueBack.get_units(5));
-        break;
+    // Parse the throttle slider values sent from C#
+    if (cmd.startsWith("T1_")) {
+      throttle1 = cmd.substring(3).toFloat();
+    } else if (cmd.startsWith("T2_")) {
+      throttle2 = cmd.substring(3).toFloat();
+    } else if (cmd == "STOP_ALL") {
+      throttle1 = 0.0;
+      throttle2 = 0.0;
     }
+  }
+
+  // 2. Send simulated data back to the PC every 100ms
+  if (millis() - lastSendTime >= 100) {
+    lastSendTime = millis();
+
+    // Generate fake data mapped to the current throttle position
+    float thrust1 = (throttle1 * 100.0) + (random(-10, 10) / 100.0);
+    float torque1 = (throttle1 * 10.0) + (random(-5, 5) / 100.0);
+    float rpm1    = (throttle1 * 50000.0) + random(-20, 20);
+    float volt1   = 24.0 - (throttle1 * 5.0) + (random(-5, 5) / 100.0);
+    float curr1   = (throttle1 * 800.0) + (random(-50, 50) / 100.0);
+
+    float thrust2 = (throttle2 * 100.0) + (random(-10, 10) / 100.0);
+    float torque2 = (throttle2 * 10.0) + (random(-5, 5) / 100.0);
+    float rpm2    = (throttle2 * 50000.0) + random(-20, 20);
+    float volt2   = 24.0 - (throttle2 * 5.0) + (random(-5, 5) / 100.0);
+    float curr2   = (throttle2 * 800.0) + (random(-50, 50) / 100.0);
+
+    // Flatline the data if throttle is exactly 0
+    if (throttle1 <= 0) { thrust1 = 0; torque1 = 0; rpm1 = 0; curr1 = 0; volt1 = 24.0; }
+    if (throttle2 <= 0) { thrust2 = 0; torque2 = 0; rpm2 = 0; curr2 = 0; volt2 = 24.0; }
+
+    // Format: Thrust1,Torque1,RPM1,Volt1,Curr1,Thrust2,Torque2,RPM2,Volt2,Curr2
+    Serial.print(thrust1); Serial.print(",");
+    Serial.print(torque1); Serial.print(",");
+    Serial.print(rpm1); Serial.print(",");
+    Serial.print(volt1); Serial.print(",");
+    Serial.print(curr1); Serial.print(",");
+    Serial.print(thrust2); Serial.print(",");
+    Serial.print(torque2); Serial.print(",");
+    Serial.print(rpm2); Serial.print(",");
+    Serial.print(volt2); Serial.print(",");
+    Serial.println(curr2);
   }
 }
