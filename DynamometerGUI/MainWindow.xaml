@@ -13,21 +13,33 @@
             <Setter Property="Background" Value="{DynamicResource BtnBg}"/>
             <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
             <Setter Property="BorderBrush" Value="Gray"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Focusable" Value="False"/>
         </Style>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
         </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Focusable" Value="False"/>
+        </Style>
+        <Style TargetType="Slider">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Focusable" Value="False"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Focusable" Value="False"/>
         </Style>
         <Style TargetType="DataGrid">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="Black"/> <!-- Hardcoded to maintain contrast in default WPF cells -->
+            <Setter Property="Foreground" Value="Black"/> 
         </Style>
     </Window.Resources>
 
     <DockPanel Margin="5">
-        <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+        <Grid DockPanel.Dock="Top" Margin="0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
@@ -37,28 +49,34 @@
             </Grid.ColumnDefinitions>
 
             <!-- Logo -->
-            <Image Grid.Column="0" Source="Dynamometer Logo.jpg" Width="140" Height="140" Margin="0,0,15,0" Stretch="Uniform" VerticalAlignment="Top"/>
+            <Image Grid.Column="0" Source="Dynamometer Logo.jpg" Width="200" Height="200" Margin="0,0,15,0" Stretch="Uniform" VerticalAlignment="Top"/>
 
-            <!-- Emergency Stop -->
-            <Button Name="BtnEmergencyStop" Grid.Column="1" Width="100" Height="100" 
-                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,15,20,0"
-                    PreviewMouseDown="BtnStop_MouseDown" PreviewMouseUp="BtnStop_MouseUp" MouseLeave="BtnStop_MouseLeave"
-                    Style="{x:Null}">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Ellipse Fill="#cc0000" Stroke="DarkRed" StrokeThickness="3"/>
-                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <TextBlock Text="STOP" Foreground="White" FontWeight="Bold" FontSize="22" HorizontalAlignment="Center"/>
-                                <TextBlock Text="Hold 3s" Foreground="White" FontSize="11" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                            </StackPanel>
-                        </Grid>
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
+            <!-- Emergency Stop Section -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Top" Margin="20,15,20,0" HorizontalAlignment="Center">
+                <Button Name="BtnEmergencyStop" Width="100" Height="100" 
+                        PreviewMouseDown="BtnStop_MouseDown" PreviewMouseUp="BtnStop_MouseUp" MouseLeave="BtnStop_MouseLeave"
+                        Style="{x:Null}" Focusable="False" FocusVisualStyle="{x:Null}">
+                    <Button.RenderTransform>
+                        <TranslateTransform x:Name="StopBtnTransform" Y="0"/>
+                    </Button.RenderTransform>
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Grid>
+                                <Ellipse Fill="#cc0000" Stroke="DarkRed" StrokeThickness="3"/>
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="STOP" Foreground="White" FontWeight="Bold" FontSize="22" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Hold 3s" Foreground="White" FontSize="11" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+                
+                <TextBlock Name="TxtStopCountdown" Text="3.0" Foreground="Red" FontWeight="Bold" FontSize="18" HorizontalAlignment="Center" Margin="0,5,0,0" Visibility="Hidden"/>
+            </StackPanel>
 
             <!-- Live Data: Inputs -->
-            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,10,0">
+            <StackPanel Name="PanelLiveDataInputsRoot" Grid.Column="2" Orientation="Vertical" VerticalAlignment="Top" Margin="30,0,10,0">
                 <TextBlock Text="Live Data: Inputs" FontWeight="Bold" Margin="0,0,0,5"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -85,7 +103,7 @@
             </StackPanel>
 
             <!-- Live Data: Derived -->
-            <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,20,0">
+            <StackPanel Name="PanelLiveDataDerivedRoot" Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,20,0">
                 <TextBlock Text="Live Data: Derived" FontWeight="Bold" Margin="0,0,0,5"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -129,7 +147,7 @@
             </StackPanel>
         </Grid>
 
-        <TabControl Name="MainTabControl" Background="Transparent" SelectionChanged="MainTabControl_SelectionChanged">
+        <TabControl Name="MainTabControl" Background="Transparent" SelectionChanged="MainTabControl_SelectionChanged" Margin="0">
             <TabItem Name="TabSingle" Header="Single Propeller">
                 <Grid Margin="0,5,0,0">
                     <Grid.ColumnDefinitions>
@@ -138,11 +156,14 @@
                     </Grid.ColumnDefinitions>
                     
                     <StackPanel Grid.Column="0" Margin="0,0,15,0">
-                        <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <Button Name="BtnTareTorqueFront1" Content="1. Tare Torque" Height="30" Margin="0,0,0,5" Click="BtnTareTorque_Click"/>
-                        <Button Name="BtnCalTorqueFront1" Content="2. Calibrate Torque (500g)" Height="30" Margin="0,0,0,10" Click="BtnCalTorque_Click"/>
-                        <Button Name="BtnTareThrustFront1" Content="3. Tare Thrust" Height="30" Margin="0,0,0,5" Click="BtnTareThrust_Click"/>
-                        <Button Name="BtnCalThrustFront1" Content="4. Calibrate Thrust (500g)" Height="30" Margin="0,0,0,20" Click="BtnCalThrust_Click"/>
+                        <Button Name="BtnStartCalSingle" Content="Start Calibration" Height="30" Margin="0,0,0,10" Click="BtnStartCal_Click"/>
+                        
+                        <Button Name="BtnTareTorqueFront1" Content="1. Tare Torque" Height="30" Margin="0,0,0,5" IsEnabled="False" Click="BtnTareTorque_Click"/>
+                        <Button Name="BtnCalTorqueFront1" Content="2. Calibrate Torque (500g)" Height="30" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalTorque_Click"/>
+                        <Button Name="BtnTareThrustFront1" Content="3. Tare Thrust" Height="30" Margin="0,0,0,5" IsEnabled="False" Click="BtnTareThrust_Click"/>
+                        <Button Name="BtnCalThrustFront1" Content="4. Calibrate Thrust (500g)" Height="30" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalThrust_Click"/>
+                        
+                        <Button Name="BtnFinishCalSingle" Content="Finish Calibration" Height="30" Margin="0,0,0,15" IsEnabled="False" Click="BtnFinishCal_Click"/>
 
                         <Separator Background="Gray" Margin="0,0,0,15"/>
 
@@ -181,17 +202,19 @@
                     
                     <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,15,0">
                         <StackPanel>
-                            <TextBlock Text="Front Stand" FontWeight="Bold" Margin="0,0,0,5"/>
-                            <Button Name="BtnTareTorqueFront2" Content="1. Tare Front Torque" Height="25" Margin="0,0,0,2" Click="BtnTareTorque_Click"/>
-                            <Button Name="BtnCalTorqueFront2" Content="2. Calibrate Front Torque (500g)" Height="25" Margin="0,0,0,8" Click="BtnCalTorque_Click"/>
-                            <Button Name="BtnTareThrustFront2" Content="3. Tare Front Thrust" Height="25" Margin="0,0,0,2" Click="BtnTareThrust_Click"/>
-                            <Button Name="BtnCalThrustFront2" Content="4. Calibrate Front Thrust (500g)" Height="25" Margin="0,0,0,15" Click="BtnCalThrust_Click"/>
+                            <Button Name="BtnStartCalCRP" Content="Start Calibration" Height="30" Margin="0,0,0,10" Click="BtnStartCal_Click"/>
+                        
+                            <Button Name="BtnTareTorqueFront2" Content="1. Tare Front Torque" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareTorque_Click"/>
+                            <Button Name="BtnCalTorqueFront2" Content="2. Calibrate Front Torque (500g)" Height="25" Margin="0,0,0,8" IsEnabled="False" Click="BtnCalTorque_Click"/>
+                            <Button Name="BtnTareThrustFront2" Content="3. Tare Front Thrust" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareThrust_Click"/>
+                            <Button Name="BtnCalThrustFront2" Content="4. Calibrate Front Thrust (500g)" Height="25" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalThrust_Click"/>
 
-                            <TextBlock Text="Back Stand" FontWeight="Bold" Margin="0,0,0,5"/>
-                            <Button Name="BtnTareTorqueBack" Content="5. Tare Back Torque" Height="25" Margin="0,0,0,2" Click="BtnTareTorqueBack_Click"/>
-                            <Button Name="BtnCalTorqueBack" Content="6. Calibrate Back Torque (500g)" Height="25" Margin="0,0,0,8" Click="BtnCalTorqueBack_Click"/>
-                            <Button Name="BtnTareThrustBack" Content="7. Tare Back Thrust" Height="25" Margin="0,0,0,2" Click="BtnTareThrustBack_Click"/>
-                            <Button Name="BtnCalThrustBack" Content="8. Calibrate Back Thrust (500g)" Height="25" Margin="0,0,0,15" Click="BtnCalThrustBack_Click"/>
+                            <Button Name="BtnTareTorqueBack" Content="5. Tare Back Torque" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareTorqueBack_Click"/>
+                            <Button Name="BtnCalTorqueBack" Content="6. Calibrate Back Torque (500g)" Height="25" Margin="0,0,0,8" IsEnabled="False" Click="BtnCalTorqueBack_Click"/>
+                            <Button Name="BtnTareThrustBack" Content="7. Tare Back Thrust" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareThrustBack_Click"/>
+                            <Button Name="BtnCalThrustBack" Content="8. Calibrate Back Thrust (500g)" Height="25" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalThrustBack_Click"/>
+
+                            <Button Name="BtnFinishCalCRP" Content="Finish Calibration" Height="30" Margin="0,0,0,15" IsEnabled="False" Click="BtnFinishCal_Click"/>
 
                             <Separator Background="Gray" Margin="0,0,0,15"/>
 
@@ -240,14 +263,29 @@
             <TabItem Name="TabLogs" Header="Test Logs">
                 <Grid Margin="10">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="280"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
-                    <StackPanel Grid.Column="0" Margin="0,0,15,0">
-                        <TextBlock Text="Recent Logs" FontWeight="Bold" Margin="0,0,0,5"/>
-                        <ListBox Name="ListLogFiles" Height="600" SelectionChanged="ListLogFiles_SelectionChanged"/>
-                    </StackPanel>
+                    <Grid Grid.Column="0" Margin="0,0,15,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        
+                        <TextBlock Grid.Row="0" Text="Recent Logs" FontWeight="Bold" Margin="0,0,0,5"/>
+                        
+                        <ListBox Name="ListLogFiles" Grid.Row="1" SelectionChanged="ListLogFiles_SelectionChanged" Margin="0,0,0,10" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        
+                        <Button Name="BtnOpenLogsFolder" Grid.Row="2" Content="Open Folder in Explorer" Height="30" Click="BtnOpenLogsFolder_Click"/>
+                    </Grid>
                     
                     <DataGrid Name="DataGridLogs" Grid.Column="1" AutoGenerateColumns="True" IsReadOnly="True"/>
                 </Grid>

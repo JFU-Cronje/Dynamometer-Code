@@ -13,7 +13,7 @@
 #if ARDUINO >= 100
 #include "Arduino.h"
 #else
-#include "WProgram.h"
+#include "Arduino.h"
 #endif
 
 class HX711
