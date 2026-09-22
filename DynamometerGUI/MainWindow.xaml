@@ -20,15 +20,19 @@
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
         </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="Black"/> <!-- Hardcoded to maintain contrast in default WPF cells -->
+        </Style>
     </Window.Resources>
 
     <DockPanel Margin="5">
         <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
@@ -36,33 +40,77 @@
             <Image Grid.Column="0" Source="Dynamometer Logo.jpg" Width="140" Height="140" Margin="0,0,15,0" Stretch="Uniform" VerticalAlignment="Top"/>
 
             <!-- Emergency Stop -->
-            <Button Name="BtnEmergencyStop" Grid.Column="1" Content="STOP (Hold 3s or Spacebar)" 
-                    Style="{x:Null}" Background="#cc0000" Foreground="White" FontWeight="Bold" FontSize="20"
-                    Width="300" Height="60" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,20,0,0"
-                    PreviewMouseDown="BtnStop_MouseDown" PreviewMouseUp="BtnStop_MouseUp" MouseLeave="BtnStop_MouseLeave"/>
+            <Button Name="BtnEmergencyStop" Grid.Column="1" Width="100" Height="100" 
+                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,15,20,0"
+                    PreviewMouseDown="BtnStop_MouseDown" PreviewMouseUp="BtnStop_MouseUp" MouseLeave="BtnStop_MouseLeave"
+                    Style="{x:Null}">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse Fill="#cc0000" Stroke="DarkRed" StrokeThickness="3"/>
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="STOP" Foreground="White" FontWeight="Bold" FontSize="22" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Hold 3s" Foreground="White" FontSize="11" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
 
             <!-- Live Data: Inputs -->
-            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,20,0" HorizontalAlignment="Right">
+            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,10,0">
                 <TextBlock Text="Live Data: Inputs" FontWeight="Bold" Margin="0,0,0,5"/>
-                <TextBlock Name="TxtVoltage" Text="Front Voltage: 0.00 V" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtCurrent" Text="Front Current: 0.00 A" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtInputThrottle1" Text="Front ESC Throttle: 0.0000" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtRPM" Text="Front RPM: 0" Margin="0,0,0,5"/>
-
-                <StackPanel Name="PanelBackData" Visibility="Collapsed">
-                    <TextBlock Name="TxtBackVoltage" Text="Back Voltage: 0.00 V" Margin="0,0,0,2"/>
-                    <TextBlock Name="TxtBackCurrent" Text="Back Current: 0.00 A" Margin="0,0,0,2"/>
-                    <TextBlock Name="TxtInputThrottle2" Text="Back ESC Throttle: 0.0000" Margin="0,0,0,2"/>
-                    <TextBlock Name="TxtBackRPM" Text="Back RPM: 0"/>
-                </StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="150"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Front Stand" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontVoltage" Text="Voltage: 0.00 V" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontCurrent" Text="Current: 0.00 A" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtInputThrottle1" Text="ESC Throttle: 0.0000" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontRPM" Text="RPM: 0"/>
+                    </StackPanel>
+                    
+                    <StackPanel Grid.Column="1" Name="PanelBackDataInputs" Visibility="Collapsed">
+                        <TextBlock Text="Back Stand" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackVoltage" Text="Voltage: 0.00 V" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackCurrent" Text="Current: 0.00 A" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtInputThrottle2" Text="ESC Throttle: 0.0000" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackRPM" Text="RPM: 0"/>
+                    </StackPanel>
+                </Grid>
             </StackPanel>
 
             <!-- Live Data: Derived -->
-            <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,30,0" HorizontalAlignment="Right">
+            <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,20,0">
                 <TextBlock Text="Live Data: Derived" FontWeight="Bold" Margin="0,0,0,5"/>
-                <TextBlock Name="TxtElecPower" Text="Elec Power: 0.00 W" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtMechEff" Text="Mech Eff: 0.0 %" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtElecEff" Text="Elec Eff: 0.0 %"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="150"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Front Stand" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontPBatEsc" Text="P_BAT-ESC: 0.00 W" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontPEscMot" Text="P_ESC-MOT: 0.00 W" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontElecEff" Text="Elec Eff: 0.0 %" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontMechPower" Text="Mech Power: 0.00 W" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontMechEff" Text="Mech Eff: 0.0 %"/>
+                    </StackPanel>
+                    
+                    <StackPanel Grid.Column="1" Name="PanelBackDataDerived" Visibility="Collapsed">
+                        <TextBlock Text="Back Stand" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackPBatEsc" Text="P_BAT-ESC: 0.00 W" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackPEscMot" Text="P_ESC-MOT: 0.00 W" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackElecEff" Text="Elec Eff: 0.0 %" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackMechPower" Text="Mech Power: 0.00 W" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackMechEff" Text="Mech Eff: 0.0 %"/>
+                    </StackPanel>
+                </Grid>
             </StackPanel>
 
             <!-- Settings -->
@@ -186,6 +234,22 @@
                         <ScottPlot:WpfPlot Name="PlotBackTorqueCRP" Grid.Row="1" Grid.Column="1" Margin="1"/>
                         <ScottPlot:WpfPlot Name="PlotBackRPMCRP" Grid.Row="2" Grid.Column="1" Margin="1"/>
                     </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Name="TabLogs" Header="Test Logs">
+                <Grid Margin="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <StackPanel Grid.Column="0" Margin="0,0,15,0">
+                        <TextBlock Text="Recent Logs" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <ListBox Name="ListLogFiles" Height="600" SelectionChanged="ListLogFiles_SelectionChanged"/>
+                    </StackPanel>
+                    
+                    <DataGrid Name="DataGridLogs" Grid.Column="1" AutoGenerateColumns="True" IsReadOnly="True"/>
                 </Grid>
             </TabItem>
         </TabControl>

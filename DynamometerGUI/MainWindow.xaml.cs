@@ -6,6 +6,8 @@ using System.Windows.Controls;
 using System.IO.Ports;
 using System.Windows.Threading;
 using System.Windows.Input;
+using System.Linq;
+using System.Data;
 
 namespace DynamometerGUI
 {
@@ -55,6 +57,7 @@ namespace DynamometerGUI
             PlotBackRPMCRP.Plot.YLabel("RPM");
 
             RefreshAllPlots();
+            LoadLogFiles();
             
             arduinoPort = new SerialPort("COM3", 115200);
             try { arduinoPort.Open(); }
@@ -69,6 +72,19 @@ namespace DynamometerGUI
             TxtTimerCRP.Text = timeFormat;
         }
 
+        private void StopRecording()
+        {
+            if (isRecording)
+            {
+                testTimer.Stop();
+                isRecording = false;
+                BtnRecordSingle.Content = "Record";
+                BtnRecordCRP.Content = "Record";
+                csvWriter?.Close();
+                LoadLogFiles(); // Refresh log tab automatically
+            }
+        }
+
         // --- Emergency Stop Logic ---
         
         private void StopHoldTimer_Tick(object? sender, EventArgs e)
@@ -81,16 +97,7 @@ namespace DynamometerGUI
         {
             ChkActivateSingle.IsChecked = false;
             ChkActivateCRP.IsChecked = false;
-
-            if (isRecording)
-            {
-                testTimer.Stop();
-                isRecording = false;
-                BtnRecordSingle.Content = "Record";
-                BtnRecordCRP.Content = "Record";
-                csvWriter?.Close();
-            }
-
+            StopRecording();
             SendCommand("STOP_ALL");
         }
 
@@ -125,21 +132,63 @@ namespace DynamometerGUI
             }
         }
 
-        // --- Tab and UI Isolation Logic ---
+        // --- Tab, Validation, and UI Isolation Logic ---
 
         private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (e.Source is TabControl && PanelBackData != null && TabCRP != null)
+            if (e.Source is TabControl && PanelBackDataInputs != null && PanelBackDataDerived != null && TabCRP != null)
             {
-                PanelBackData.Visibility = TabCRP.IsSelected ? Visibility.Visible : Visibility.Collapsed;
+                bool isCRP = TabCRP.IsSelected;
+                PanelBackDataInputs.Visibility = isCRP ? Visibility.Visible : Visibility.Collapsed;
+                PanelBackDataDerived.Visibility = isCRP ? Visibility.Visible : Visibility.Collapsed;
             }
+        }
+
+        private void LoadLogFiles()
+        {
+            if (ListLogFiles == null) return;
+            ListLogFiles.Items.Clear();
+            
+            var files = Directory.GetFiles(Directory.GetCurrentDirectory(), "DynamometerData_*.csv")
+                                 .OrderByDescending(f => f).ToList();
+            
+            foreach (var f in files)
+            {
+                ListLogFiles.Items.Add(Path.GetFileName(f));
+            }
+        }
+
+        private void ListLogFiles_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ListLogFiles.SelectedItem == null) return;
+            
+            string file = ListLogFiles.SelectedItem.ToString() ?? "";
+            if (!File.Exists(file)) return;
+
+            string[] lines = File.ReadAllLines(file);
+            if (lines.Length == 0) return;
+
+            var dt = new DataTable();
+            string[] headers = lines[0].Split(',');
+            foreach (string header in headers)
+            {
+                dt.Columns.Add(header);
+            }
+
+            for (int i = 1; i < lines.Length; i++)
+            {
+                dt.Rows.Add(lines[i].Split(','));
+            }
+            
+            DataGridLogs.ItemsSource = dt.DefaultView;
         }
 
         private void ChkActivateSingle_Checked(object sender, RoutedEventArgs e)
         {
             SldThrottleSingle.IsEnabled = true;
             BtnRecordSingle.IsEnabled = true;
-            TabCRP.IsEnabled = false; // Lock out other tab
+            TabCRP.IsEnabled = false; 
+            TabLogs.IsEnabled = false;
             SendCommand("UNLOCK_SINGLE");
         }
 
@@ -148,7 +197,9 @@ namespace DynamometerGUI
             SldThrottleSingle.IsEnabled = false;
             SldThrottleSingle.Value = 0; 
             BtnRecordSingle.IsEnabled = false;
-            TabCRP.IsEnabled = true; // Restore access
+            TabCRP.IsEnabled = true; 
+            TabLogs.IsEnabled = true;
+            StopRecording();
             SendCommand("LOCK_SINGLE");
         }
 
@@ -157,7 +208,8 @@ namespace DynamometerGUI
             SldThrottleFrontCRP.IsEnabled = true;
             SldThrottleBackCRP.IsEnabled = true;
             BtnRecordCRP.IsEnabled = true;
-            TabSingle.IsEnabled = false; // Lock out other tab
+            TabSingle.IsEnabled = false;
+            TabLogs.IsEnabled = false;
             SendCommand("UNLOCK_CRP");
         }
 
@@ -168,28 +220,30 @@ namespace DynamometerGUI
             SldThrottleFrontCRP.Value = 0; 
             SldThrottleBackCRP.Value = 0;
             BtnRecordCRP.IsEnabled = false;
-            TabSingle.IsEnabled = true; // Restore access
+            TabSingle.IsEnabled = true; 
+            TabLogs.IsEnabled = true;
+            StopRecording();
             SendCommand("LOCK_CRP");
         }
 
         private void SldThrottleSingle_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (TxtThrottleValueSingle != null) TxtThrottleValueSingle.Text = e.NewValue.ToString("F4");
-            if (TxtInputThrottle1 != null) TxtInputThrottle1.Text = $"Front ESC Throttle: {e.NewValue:F4}";
+            if (TxtInputThrottle1 != null) TxtInputThrottle1.Text = $"ESC Throttle: {e.NewValue:F4}";
             SendCommand($"T1_{e.NewValue:F4}");
         }
 
         private void SldThrottleFrontCRP_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (TxtThrottleValueFrontCRP != null) TxtThrottleValueFrontCRP.Text = e.NewValue.ToString("F4");
-            if (TxtInputThrottle1 != null) TxtInputThrottle1.Text = $"Front ESC Throttle: {e.NewValue:F4}";
+            if (TxtInputThrottle1 != null) TxtInputThrottle1.Text = $"ESC Throttle: {e.NewValue:F4}";
             SendCommand($"T1_{e.NewValue:F4}");
         }
 
         private void SldThrottleBackCRP_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (TxtThrottleValueBackCRP != null) TxtThrottleValueBackCRP.Text = e.NewValue.ToString("F4");
-            if (TxtInputThrottle2 != null) TxtInputThrottle2.Text = $"Back ESC Throttle: {e.NewValue:F4}";
+            if (TxtInputThrottle2 != null) TxtInputThrottle2.Text = $"ESC Throttle: {e.NewValue:F4}";
             SendCommand($"T2_{e.NewValue:F4}");
         }
 
@@ -209,11 +263,7 @@ namespace DynamometerGUI
             }
             else
             {
-                testTimer.Stop();
-                isRecording = false;
-                BtnRecordSingle.Content = "Record";
-                BtnRecordCRP.Content = "Record";
-                csvWriter?.Close();
+                StopRecording();
             }
         }
 
