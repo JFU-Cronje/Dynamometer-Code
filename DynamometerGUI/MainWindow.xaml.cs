@@ -78,8 +78,13 @@ namespace DynamometerGUI
 
             foreach (var p in plots)
             {
-                p.Plot.XLabel("Time (s)");
                 p.Plot.Axes.SetLimitsX(0, 20);
+                
+                var anno = p.Plot.Add.Annotation("Time (s)", ScottPlot.Alignment.LowerRight);
+                anno.LabelBorderColor = ScottPlot.Colors.Transparent;
+                anno.LabelBackgroundColor = ScottPlot.Colors.Transparent;
+                anno.LabelShadowColor = ScottPlot.Colors.Transparent;
+                anno.LabelFontColor = ScottPlot.Colors.Gray;
             }
 
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
