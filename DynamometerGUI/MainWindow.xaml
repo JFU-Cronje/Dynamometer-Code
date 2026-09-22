@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ScottPlot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
-        Name="WindowMain" Title="Dynamometer Control Panel" Height="800" Width="1200">
+        Name="WindowMain" Title="Dynamometer Control Panel" Height="800" Width="1200"
+        PreviewKeyDown="Window_PreviewKeyDown" PreviewKeyUp="Window_PreviewKeyUp">
     <Window.Resources>
         <SolidColorBrush x:Key="MainBg" Color="#edf0f4" />
         <SolidColorBrush x:Key="MainFg" Color="Black" />
@@ -28,27 +29,44 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <Image Grid.Column="0" Source="Dynamometer Logo.jpg" Width="140" Height="140" Margin="0,0,15,0" Stretch="Uniform"/>
+            <!-- Logo -->
+            <Image Grid.Column="0" Source="Dynamometer Logo.jpg" Width="140" Height="140" Margin="0,0,15,0" Stretch="Uniform" VerticalAlignment="Top"/>
 
-            <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,20,0" HorizontalAlignment="Right">
+            <!-- Emergency Stop -->
+            <Button Name="BtnEmergencyStop" Grid.Column="1" Content="STOP (Hold 3s or Spacebar)" 
+                    Style="{x:Null}" Background="#cc0000" Foreground="White" FontWeight="Bold" FontSize="20"
+                    Width="300" Height="60" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,20,0,0"
+                    PreviewMouseDown="BtnStop_MouseDown" PreviewMouseUp="BtnStop_MouseUp" MouseLeave="BtnStop_MouseLeave"/>
+
+            <!-- Live Data: Inputs -->
+            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,20,0" HorizontalAlignment="Right">
                 <TextBlock Text="Live Data: Inputs" FontWeight="Bold" Margin="0,0,0,5"/>
-                <TextBlock Name="TxtVoltage" Text="Voltage: 0.00 V" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtCurrent" Text="Current: 0.00 A" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtVoltage" Text="Front Voltage: 0.00 V" Margin="0,0,0,2"/>
+                <TextBlock Name="TxtCurrent" Text="Front Current: 0.00 A" Margin="0,0,0,2"/>
                 <TextBlock Name="TxtInputThrottle1" Text="Front ESC Throttle: 0.0000" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtInputThrottle2" Text="Back ESC Throttle: 0.0000" Margin="0,0,0,2"/>
-                <TextBlock Name="TxtRPM" Text="RPM: 0"/>
+                <TextBlock Name="TxtRPM" Text="Front RPM: 0" Margin="0,0,0,5"/>
+
+                <StackPanel Name="PanelBackData" Visibility="Collapsed">
+                    <TextBlock Name="TxtBackVoltage" Text="Back Voltage: 0.00 V" Margin="0,0,0,2"/>
+                    <TextBlock Name="TxtBackCurrent" Text="Back Current: 0.00 A" Margin="0,0,0,2"/>
+                    <TextBlock Name="TxtInputThrottle2" Text="Back ESC Throttle: 0.0000" Margin="0,0,0,2"/>
+                    <TextBlock Name="TxtBackRPM" Text="Back RPM: 0"/>
+                </StackPanel>
             </StackPanel>
 
-            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,30,0" HorizontalAlignment="Right">
+            <!-- Live Data: Derived -->
+            <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,30,0" HorizontalAlignment="Right">
                 <TextBlock Text="Live Data: Derived" FontWeight="Bold" Margin="0,0,0,5"/>
                 <TextBlock Name="TxtElecPower" Text="Elec Power: 0.00 W" Margin="0,0,0,2"/>
                 <TextBlock Name="TxtMechEff" Text="Mech Eff: 0.0 %" Margin="0,0,0,2"/>
                 <TextBlock Name="TxtElecEff" Text="Elec Eff: 0.0 %"/>
             </StackPanel>
 
-            <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right">
+            <!-- Settings -->
+            <StackPanel Grid.Column="4" Orientation="Vertical" VerticalAlignment="Top" HorizontalAlignment="Right">
                 <TextBlock Text="Theme:" FontWeight="Bold" Margin="0,0,0,2"/>
                 <ComboBox Name="CmbTheme" Width="100" HorizontalAlignment="Left" Margin="0,0,0,10" SelectionChanged="CmbTheme_SelectionChanged">
                     <ComboBoxItem Content="Light" IsSelected="True"/>
@@ -63,8 +81,8 @@
             </StackPanel>
         </Grid>
 
-        <TabControl Background="Transparent">
-            <TabItem Header="Single Propeller">
+        <TabControl Name="MainTabControl" Background="Transparent" SelectionChanged="MainTabControl_SelectionChanged">
+            <TabItem Name="TabSingle" Header="Single Propeller">
                 <Grid Margin="0,5,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220"/> 
@@ -89,7 +107,7 @@
                             <TextBox Name="TxtThrottleValueSingle" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
                         </StackPanel>
                         
-                        <Button Name="BtnRecordSingle" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" Click="BtnRecord_Click"/>
+                        <Button Name="BtnRecordSingle" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" IsEnabled="False" Click="BtnRecord_Click"/>
                         <TextBlock Name="TxtTimerSingle" Text="Time: 00:00:00.000" FontWeight="SemiBold"/>
                     </StackPanel>
 
@@ -106,7 +124,7 @@
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Contra Rotating Propellers">
+            <TabItem Name="TabCRP" Header="Contra Rotating Propellers">
                 <Grid Margin="0,5,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220"/>
@@ -144,7 +162,7 @@
                                 <TextBox Name="TxtThrottleValueBackCRP" Text="0.0000" Width="55" Margin="5,0,0,0" IsReadOnly="True" TextAlignment="Center"/>
                             </StackPanel>
                             
-                            <Button Name="BtnRecordCRP" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" Click="BtnRecord_Click"/>
+                            <Button Name="BtnRecordCRP" Content="Record" Width="70" Height="25" HorizontalAlignment="Left" Margin="0,0,0,5" IsEnabled="False" Click="BtnRecord_Click"/>
                             <TextBlock Name="TxtTimerCRP" Text="Time: 00:00:00.000" FontWeight="SemiBold" Margin="0,0,0,10"/>
                         </StackPanel>
                     </ScrollViewer>

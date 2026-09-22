@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Controls;
 using System.IO.Ports;
 using System.Windows.Threading;
+using System.Windows.Input;
 
 namespace DynamometerGUI
 {
@@ -12,6 +13,7 @@ namespace DynamometerGUI
     {
         SerialPort arduinoPort;
         DispatcherTimer testTimer;
+        DispatcherTimer stopHoldTimer;
         DateTime startTime;
         bool isRecording = false;
         StreamWriter? csvWriter = null;
@@ -26,6 +28,10 @@ namespace DynamometerGUI
             testTimer = new DispatcherTimer();
             testTimer.Interval = TimeSpan.FromMilliseconds(10);
             testTimer.Tick += TestTimer_Tick;
+
+            stopHoldTimer = new DispatcherTimer();
+            stopHoldTimer.Interval = TimeSpan.FromSeconds(3);
+            stopHoldTimer.Tick += StopHoldTimer_Tick;
 
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
             PlotFrontThrustSingle.Plot.YLabel("Thrust (kgf)");
@@ -63,9 +69,77 @@ namespace DynamometerGUI
             TxtTimerCRP.Text = timeFormat;
         }
 
+        // --- Emergency Stop Logic ---
+        
+        private void StopHoldTimer_Tick(object? sender, EventArgs e)
+        {
+            stopHoldTimer.Stop();
+            ExecuteEmergencyStop();
+        }
+
+        private void ExecuteEmergencyStop()
+        {
+            ChkActivateSingle.IsChecked = false;
+            ChkActivateCRP.IsChecked = false;
+
+            if (isRecording)
+            {
+                testTimer.Stop();
+                isRecording = false;
+                BtnRecordSingle.Content = "Record";
+                BtnRecordCRP.Content = "Record";
+                csvWriter?.Close();
+            }
+
+            SendCommand("STOP_ALL");
+        }
+
+        private void BtnStop_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            stopHoldTimer.Start();
+        }
+
+        private void BtnStop_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            stopHoldTimer.Stop();
+        }
+
+        private void BtnStop_MouseLeave(object sender, MouseEventArgs e)
+        {
+            stopHoldTimer.Stop();
+        }
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space && !e.IsRepeat)
+            {
+                stopHoldTimer.Start();
+            }
+        }
+
+        private void Window_PreviewKeyUp(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space)
+            {
+                stopHoldTimer.Stop();
+            }
+        }
+
+        // --- Tab and UI Isolation Logic ---
+
+        private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (e.Source is TabControl && PanelBackData != null && TabCRP != null)
+            {
+                PanelBackData.Visibility = TabCRP.IsSelected ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
         private void ChkActivateSingle_Checked(object sender, RoutedEventArgs e)
         {
             SldThrottleSingle.IsEnabled = true;
+            BtnRecordSingle.IsEnabled = true;
+            TabCRP.IsEnabled = false; // Lock out other tab
             SendCommand("UNLOCK_SINGLE");
         }
 
@@ -73,6 +147,8 @@ namespace DynamometerGUI
         {
             SldThrottleSingle.IsEnabled = false;
             SldThrottleSingle.Value = 0; 
+            BtnRecordSingle.IsEnabled = false;
+            TabCRP.IsEnabled = true; // Restore access
             SendCommand("LOCK_SINGLE");
         }
 
@@ -80,6 +156,8 @@ namespace DynamometerGUI
         {
             SldThrottleFrontCRP.IsEnabled = true;
             SldThrottleBackCRP.IsEnabled = true;
+            BtnRecordCRP.IsEnabled = true;
+            TabSingle.IsEnabled = false; // Lock out other tab
             SendCommand("UNLOCK_CRP");
         }
 
@@ -89,6 +167,8 @@ namespace DynamometerGUI
             SldThrottleBackCRP.IsEnabled = false;
             SldThrottleFrontCRP.Value = 0; 
             SldThrottleBackCRP.Value = 0;
+            BtnRecordCRP.IsEnabled = false;
+            TabSingle.IsEnabled = true; // Restore access
             SendCommand("LOCK_CRP");
         }
 
