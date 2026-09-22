@@ -14,7 +14,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Dynamometer Logo.jpg" />
+    <Resource Include="Dynamometer Logo NoText NoBackground.png"/>
+    <Resource Include="Dynamometer Logo NoText DarkMode NoBackground.png"/>
   </ItemGroup>
 
 </Project>

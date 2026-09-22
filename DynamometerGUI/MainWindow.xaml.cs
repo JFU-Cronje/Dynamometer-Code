@@ -10,11 +10,17 @@ using System.Linq;
 using System.Data;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 
 namespace DynamometerGUI
 {
     public partial class MainWindow : Window
     {
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
         SerialPort arduinoPort;
         DispatcherTimer testTimer;
         DispatcherTimer stopHoldTimer;
@@ -52,6 +58,30 @@ namespace DynamometerGUI
             stopHoldTimer.Interval = TimeSpan.FromMilliseconds(50);
             stopHoldTimer.Tick += StopHoldTimer_Tick;
 
+            InitializeGraphAxes();
+            RefreshAllPlots();
+            LoadLogFiles();
+            
+            arduinoPort = new SerialPort("COM3", 115200);
+            try { arduinoPort.Open(); }
+            catch { MessageBox.Show("Could not open COM3. Verify the Arduino Uno is plugged in."); }
+        }
+
+        private void InitializeGraphAxes()
+        {
+            var plots = new[] 
+            { 
+                PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle, 
+                PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP, 
+                PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP 
+            };
+
+            foreach (var p in plots)
+            {
+                p.Plot.XLabel("Time (s)");
+                p.Plot.Axes.SetLimitsX(0, 20);
+            }
+
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
             PlotFrontThrustSingle.Plot.YLabel("Thrust (kgf)");
             PlotFrontTorqueSingle.Plot.Title("Front Torque");
@@ -72,13 +102,22 @@ namespace DynamometerGUI
             PlotBackTorqueCRP.Plot.YLabel("Torque (Nm)");
             PlotBackRPMCRP.Plot.Title("Back RPM");
             PlotBackRPMCRP.Plot.YLabel("RPM");
+        }
 
-            RefreshAllPlots();
-            LoadLogFiles();
-            
-            arduinoPort = new SerialPort("COM3", 115200);
-            try { arduinoPort.Open(); }
-            catch { MessageBox.Show("Could not open COM3. Verify the Arduino Uno is plugged in."); }
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            ApplyTitleBarTheme(CmbTheme.SelectedIndex == 1);
+        }
+
+        private void ApplyTitleBarTheme(bool isDark)
+        {
+            try
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                int useImmersiveDarkMode = isDark ? 1 : 0;
+                DwmSetWindowAttribute(hwnd, 20, ref useImmersiveDarkMode, sizeof(int));
+            }
+            catch { }
         }
 
         private void TestTimer_Tick(object? sender, EventArgs e)
@@ -313,6 +352,11 @@ namespace DynamometerGUI
             BtnFinishCalSingle.IsEnabled = enabled;
             BtnStartCalCRP.IsEnabled = !enabled;
             BtnFinishCalCRP.IsEnabled = enabled;
+
+            // Lock out tabs so user cannot switch mid-calibration
+            TabSingle.IsEnabled = !enabled || TabSingle.IsSelected;
+            TabCRP.IsEnabled = !enabled || TabCRP.IsSelected;
+            TabLogs.IsEnabled = !enabled;
         }
 
         private void BtnStartCal_Click(object sender, RoutedEventArgs e)
@@ -447,16 +491,33 @@ namespace DynamometerGUI
             {
                 this.Resources["MainBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1E1E1E"));
                 this.Resources["MainFg"] = new SolidColorBrush(Colors.White);
-                this.Resources["BtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2D2D30"));
+                this.Resources["BtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E3E42"));
+                this.Resources["HoverBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#555555"));
+                this.Resources["DisabledBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2D2D30"));
+                this.Resources["ControlBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2D2D30"));
+                
+                if (ImgLogo != null)
+                {
+                    try { ImgLogo.Source = new BitmapImage(new Uri("pack://application:,,,/Dynamometer Logo NoText DarkMode NoBackground.png")); } catch { }
+                }
             }
             else
             {
                 this.Resources["MainBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#edf0f4"));
                 this.Resources["MainFg"] = new SolidColorBrush(Colors.Black);
                 this.Resources["BtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D0D9E4"));
+                this.Resources["HoverBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B8C5D1"));
+                this.Resources["DisabledBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#cccccc"));
+                this.Resources["ControlBg"] = new SolidColorBrush(Colors.White);
+
+                if (ImgLogo != null)
+                {
+                    try { ImgLogo.Source = new BitmapImage(new Uri("pack://application:,,,/Dynamometer Logo NoText NoBackground.png")); } catch { }
+                }
             }
 
             SetPlotTheme(isDark);
+            ApplyTitleBarTheme(isDark);
         }
 
         private void SetPlotTheme(bool isDark)
@@ -468,19 +529,23 @@ namespace DynamometerGUI
                 PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP 
             };
 
-            foreach (var plotControl in plots)
+            foreach (var p in plots)
             {
+                p.Plot.Axes.AutoScaleY();
+                
                 if (isDark)
                 {
-                    plotControl.Plot.FigureBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
-                    plotControl.Plot.DataBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
-                    plotControl.Plot.Axes.Color(ScottPlot.Color.FromHex("#FFFFFF"));
+                    p.Plot.FigureBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
+                    p.Plot.DataBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
+                    p.Plot.Axes.Color(ScottPlot.Color.FromHex("#FFFFFF"));
+                    p.Plot.Grid.MajorLineColor = ScottPlot.Color.FromHex("#444444");
                 }
                 else
                 {
-                    plotControl.Plot.FigureBackground.Color = ScottPlot.Color.FromHex("#edf0f4");
-                    plotControl.Plot.DataBackground.Color = ScottPlot.Colors.White;
-                    plotControl.Plot.Axes.Color(ScottPlot.Colors.Black);
+                    p.Plot.FigureBackground.Color = ScottPlot.Color.FromHex("#edf0f4");
+                    p.Plot.DataBackground.Color = ScottPlot.Colors.White;
+                    p.Plot.Axes.Color(ScottPlot.Colors.Black);
+                    p.Plot.Grid.MajorLineColor = ScottPlot.Color.FromHex("#DDDDDD");
                 }
             }
             
