@@ -26,19 +26,36 @@ const int hxTorque2Dat = 12;
 const int hxTorque2Clk = A0;  
 
 // System Constants
-const float PULSES_PER_REV = 1.0;          // Adjust if your RPM sensor triggers multiple times per revolution
-const float TORQUE_ARM_LENGTH_METERS = 1.0; // IMPORTANT: Replace 1.0 with the physical length of your torque arm in meters
+const float PULSES_PER_REV = 1.0;           // 1 white sticker per rotor
+const float TORQUE_ARM_LENGTH_METERS = 1.0; // IMPORTANT: Replace 1.0 with your actual torque arm length in meters
 
-// RPM Tracking
+// RPM Tracking with Debounce
 volatile unsigned long rpmPulses1 = 0;
 volatile unsigned long rpmPulses2 = 0;
-unsigned long lastTime = 0;
+volatile unsigned long lastPulseTime1 = 0;
+volatile unsigned long lastPulseTime2 = 0;
+unsigned long lastSendTime = 0;
 
 // Non-blocking Load Cell Cache
 float valThrust1 = 0, valTorque1 = 0, valThrust2 = 0, valTorque2 = 0;
 
-void countRpm1() { rpmPulses1++; }
-void countRpm2() { rpmPulses2++; }
+// Interrupt Service Routines for KE0068 (Active LOW on White)
+void countRpm1() { 
+  unsigned long now = micros();
+  // 1000us debounce caps the maximum readable RPM at 60,000, preventing noise double-triggers
+  if (now - lastPulseTime1 > 1000) {
+    rpmPulses1++; 
+    lastPulseTime1 = now;
+  }
+}
+
+void countRpm2() { 
+  unsigned long now = micros();
+  if (now - lastPulseTime2 > 1000) {
+    rpmPulses2++; 
+    lastPulseTime2 = now;
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -55,11 +72,11 @@ void setup() {
   escFront.writeMicroseconds(1000);
   escBack.writeMicroseconds(1000);
 
-  // Initialize RPM Interrupts
+  // Initialize RPM Interrupts for FALLING edge (HIGH to LOW transition)
   pinMode(pinRpm1, INPUT_PULLUP);
   pinMode(pinRpm2, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, RISING);
-  attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, RISING);
+  attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
+  attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
 
   Serial.println("Dynamometer Hardware Initialized");
 }
@@ -82,30 +99,28 @@ void loop() {
       escBack.writeMicroseconds(1000);
     }
     
-    // Calibration 
-    // A 500g weight applies a downward force of 4.903325 Newtons.
-    // For torque, the true moment is Force * Lever Arm.
-    float calForceN = 4.903325;
+    // Calibration (Taking 30 samples for a highly stable average)
+    float calForceN = 4.903325; // Force of 500g mass
     float calTorqueNm = calForceN * TORQUE_ARM_LENGTH_METERS;
 
-    if (cmd == "A") { torqueFront.tare(10); }
-    else if (cmd == "B") { torqueFront.set_scale(torqueFront.get_value(10) / calTorqueNm); } 
-    else if (cmd == "C") { thrustFront.tare(10); }
-    else if (cmd == "D") { thrustFront.set_scale(thrustFront.get_value(10) / calForceN); }
-    else if (cmd == "E") { torqueBack.tare(10); }
-    else if (cmd == "F") { torqueBack.set_scale(torqueBack.get_value(10) / calTorqueNm); }
-    else if (cmd == "G") { thrustBack.tare(10); }
-    else if (cmd == "H") { thrustBack.set_scale(thrustBack.get_value(10) / calForceN); }
+    if (cmd == "A") { torqueFront.tare(30); }
+    else if (cmd == "B") { torqueFront.set_scale(torqueFront.get_value(30) / calTorqueNm); } 
+    else if (cmd == "C") { thrustFront.tare(30); }
+    else if (cmd == "D") { thrustFront.set_scale(thrustFront.get_value(30) / calForceN); }
+    else if (cmd == "E") { torqueBack.tare(30); }
+    else if (cmd == "F") { torqueBack.set_scale(torqueBack.get_value(30) / calTorqueNm); }
+    else if (cmd == "G") { thrustBack.tare(30); }
+    else if (cmd == "H") { thrustBack.set_scale(thrustBack.get_value(30) / calForceN); }
   }
 
   // 2. Send real data back to the PC every 100ms (10Hz)
   unsigned long now = millis();
-  if (now - lastTime >= 100) {
-    unsigned long dt = now - lastTime;
-    lastTime = now;
+  if (now - lastSendTime >= 100) {
+    unsigned long dt = now - lastSendTime;
+    lastSendTime = now;
 
-    // RPM Calculation
-    noInterrupts(); // Briefly pause interrupts to prevent data corruption while copying
+    // Safely copy RPM pulses
+    noInterrupts(); 
     unsigned long pulses1 = rpmPulses1;
     unsigned long pulses2 = rpmPulses2;
     rpmPulses1 = 0;
@@ -125,12 +140,12 @@ void loop() {
     Serial.print(valThrust1, 3); Serial.print(",");
     Serial.print(valTorque1, 3); Serial.print(",");
     Serial.print(currentRpm1, 0); Serial.print(",");
-    Serial.print(0.00); Serial.print(","); // Volt 1 (Not wired)
-    Serial.print(0.00); Serial.print(","); // Curr 1 (Not wired)
+    Serial.print(0.00); Serial.print(","); 
+    Serial.print(0.00); Serial.print(","); 
     Serial.print(valThrust2, 3); Serial.print(",");
     Serial.print(valTorque2, 3); Serial.print(",");
     Serial.print(currentRpm2, 0); Serial.print(",");
-    Serial.print(0.00); Serial.print(","); // Volt 2 (Not wired)
-    Serial.println(0.00);                  // Curr 2 (Not wired)
+    Serial.print(0.00); Serial.print(","); 
+    Serial.println(0.00);                  
   }
 }
