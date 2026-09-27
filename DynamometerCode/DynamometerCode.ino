@@ -26,8 +26,8 @@ const int hxTorque2Dat = 12;
 const int hxTorque2Clk = A0;  
 
 // System Constants
-const float PULSES_PER_REV = 1.0;           // 1 white sticker per rotor
-const float TORQUE_ARM_LENGTH_METERS = 1.0; // IMPORTANT: Replace 1.0 with your actual torque arm length in meters
+const float PULSES_PER_REV = 1.0;           
+const float TORQUE_ARM_LENGTH_METERS = 1.0; 
 
 // RPM Tracking with Debounce
 volatile unsigned long rpmPulses1 = 0;
@@ -39,10 +39,8 @@ unsigned long lastSendTime = 0;
 // Non-blocking Load Cell Cache
 float valThrust1 = 0, valTorque1 = 0, valThrust2 = 0, valTorque2 = 0;
 
-// Interrupt Service Routines for KE0068 (Active LOW on White)
 void countRpm1() { 
   unsigned long now = micros();
-  // 1000us debounce caps the maximum readable RPM at 60,000, preventing noise double-triggers
   if (now - lastPulseTime1 > 1000) {
     rpmPulses1++; 
     lastPulseTime1 = now;
@@ -60,19 +58,16 @@ void countRpm2() {
 void setup() {
   Serial.begin(115200);
 
-  // Initialize HX711s
   thrustFront.begin(hxThrust1Dat, hxThrust1Clk);
   torqueFront.begin(hxTorque1Dat, hxTorque1Clk);
   thrustBack.begin(hxThrust2Dat, hxThrust2Clk);
   torqueBack.begin(hxTorque2Dat, hxTorque2Clk);
 
-  // Initialize ESCs
-  escFront.attach(pinEsc1, 1000, 2000);
-  escBack.attach(pinEsc2, 1000, 2000);
-  escFront.writeMicroseconds(1000);
-  escBack.writeMicroseconds(1000);
+  escFront.attach(pinEsc1, 1100, 1900);
+  escBack.attach(pinEsc2, 1100, 1900);
+  escFront.writeMicroseconds(1100);
+  escBack.writeMicroseconds(1100);
 
-  // Initialize RPM Interrupts for FALLING edge (HIGH to LOW transition)
   pinMode(pinRpm1, INPUT_PULLUP);
   pinMode(pinRpm2, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
@@ -82,44 +77,63 @@ void setup() {
 }
 
 void loop() {
-  // 1. Listen for commands from the PC GUI
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
     
-    // ESC Control
+    // PC Throttle commands map 0-100 % into 1100-1900 Microseconds
     if (cmd.startsWith("T1_")) {
-      float throttle = cmd.substring(3).toFloat();
-      escFront.writeMicroseconds(1000 + (throttle * 1000));
+      float throttlePct = cmd.substring(3).toFloat();
+      escFront.writeMicroseconds(1100 + (throttlePct * 8.0));
     } else if (cmd.startsWith("T2_")) {
-      float throttle = cmd.substring(3).toFloat();
-      escBack.writeMicroseconds(1000 + (throttle * 1000));
+      float throttlePct = cmd.substring(3).toFloat();
+      escBack.writeMicroseconds(1100 + (throttlePct * 8.0));
     } else if (cmd == "STOP_ALL") {
-      escFront.writeMicroseconds(1000);
-      escBack.writeMicroseconds(1000);
+      escFront.writeMicroseconds(1100);
+      escBack.writeMicroseconds(1100);
+    } 
+    // Manual Scale Application via CSV reading on Boot
+    else if (cmd.startsWith("S_T1_")) { thrustFront.set_scale(cmd.substring(5).toFloat()); }
+    else if (cmd.startsWith("S_Q1_")) { torqueFront.set_scale(cmd.substring(5).toFloat()); }
+    else if (cmd.startsWith("S_T2_")) { thrustBack.set_scale(cmd.substring(5).toFloat()); }
+    else if (cmd.startsWith("S_Q2_")) { torqueBack.set_scale(cmd.substring(5).toFloat()); }
+    // Global Tare to correct raw zeros before scales are implemented on load
+    else if (cmd == "TARE_ALL") {
+      thrustFront.tare(30); torqueFront.tare(30);
+      thrustBack.tare(30); torqueBack.tare(30);
     }
     
-    // Calibration (Taking 30 samples for a highly stable average)
+    // Calibration 
     float calForceN = 4.903325; // Force of 500g mass
     float calTorqueNm = calForceN * TORQUE_ARM_LENGTH_METERS;
 
-    if (cmd == "A") { torqueFront.tare(30); }
-    else if (cmd == "B") { torqueFront.set_scale(torqueFront.get_value(30) / calTorqueNm); } 
-    else if (cmd == "C") { thrustFront.tare(30); }
-    else if (cmd == "D") { thrustFront.set_scale(thrustFront.get_value(30) / calForceN); }
-    else if (cmd == "E") { torqueBack.tare(30); }
-    else if (cmd == "F") { torqueBack.set_scale(torqueBack.get_value(30) / calTorqueNm); }
-    else if (cmd == "G") { thrustBack.tare(30); }
-    else if (cmd == "H") { thrustBack.set_scale(thrustBack.get_value(30) / calForceN); }
+    if (cmd == "A") { thrustFront.tare(30); }
+    else if (cmd == "B") { 
+      thrustFront.set_scale(thrustFront.get_value(30) / calForceN); 
+      Serial.print("CAL:T1:"); Serial.println(thrustFront.get_scale(), 4);
+    } 
+    else if (cmd == "C") { torqueFront.tare(30); }
+    else if (cmd == "D") { 
+      torqueFront.set_scale(torqueFront.get_value(30) / calTorqueNm); 
+      Serial.print("CAL:Q1:"); Serial.println(torqueFront.get_scale(), 4);
+    }
+    else if (cmd == "E") { thrustBack.tare(30); }
+    else if (cmd == "F") { 
+      thrustBack.set_scale(thrustBack.get_value(30) / calForceN); 
+      Serial.print("CAL:T2:"); Serial.println(thrustBack.get_scale(), 4);
+    }
+    else if (cmd == "G") { torqueBack.tare(30); }
+    else if (cmd == "H") { 
+      torqueBack.set_scale(torqueBack.get_value(30) / calTorqueNm); 
+      Serial.print("CAL:Q2:"); Serial.println(torqueBack.get_scale(), 4);
+    }
   }
 
-  // 2. Send real data back to the PC every 100ms (10Hz)
   unsigned long now = millis();
   if (now - lastSendTime >= 100) {
     unsigned long dt = now - lastSendTime;
     lastSendTime = now;
 
-    // Safely copy RPM pulses
     noInterrupts(); 
     unsigned long pulses1 = rpmPulses1;
     unsigned long pulses2 = rpmPulses2;
@@ -130,13 +144,11 @@ void loop() {
     float currentRpm1 = (pulses1 / PULSES_PER_REV * 60000.0) / dt;
     float currentRpm2 = (pulses2 / PULSES_PER_REV * 60000.0) / dt;
 
-    // Read Load Cells Non-Blocking
     if (thrustFront.is_ready()) valThrust1 = thrustFront.get_units(1);
     if (torqueFront.is_ready()) valTorque1 = torqueFront.get_units(1);
     if (thrustBack.is_ready())  valThrust2 = thrustBack.get_units(1);
     if (torqueBack.is_ready())  valTorque2 = torqueBack.get_units(1);
 
-    // Format: Thrust1,Torque1,RPM1,Volt1,Curr1,Thrust2,Torque2,RPM2,Volt2,Curr2
     Serial.print(valThrust1, 3); Serial.print(",");
     Serial.print(valTorque1, 3); Serial.print(",");
     Serial.print(currentRpm1, 0); Serial.print(",");
