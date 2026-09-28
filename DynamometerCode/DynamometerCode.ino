@@ -29,9 +29,9 @@ const int hxTorque2Clk = A0;
 const float PULSES_PER_REV = 1.0;           
 const float TORQUE_ARM_LENGTH_METERS = 1.0; 
 
-// RPM Tracking with Debounce
-volatile unsigned long rpmPulses1 = 0;
-volatile unsigned long rpmPulses2 = 0;
+// RPM Tracking with Debounce (Period Measurement)
+volatile unsigned long pulsePeriod1 = 0;
+volatile unsigned long pulsePeriod2 = 0;
 volatile unsigned long lastPulseTime1 = 0;
 volatile unsigned long lastPulseTime2 = 0;
 unsigned long lastSendTime = 0;
@@ -39,18 +39,22 @@ unsigned long lastSendTime = 0;
 // Non-blocking Load Cell Cache
 float valThrust1 = 0, valTorque1 = 0, valThrust2 = 0, valTorque2 = 0;
 
+// Interrupt Service Routines for KE0068 (Active LOW on White)
 void countRpm1() { 
   unsigned long now = micros();
-  if (now - lastPulseTime1 > 1000) {
-    rpmPulses1++; 
+  unsigned long interval = now - lastPulseTime1;
+  // 5000us debounce caps the maximum readable RPM at 12,000, preventing noise double-triggers
+  if (interval > 5000) {
+    pulsePeriod1 = interval; 
     lastPulseTime1 = now;
   }
 }
 
 void countRpm2() { 
   unsigned long now = micros();
-  if (now - lastPulseTime2 > 1000) {
-    rpmPulses2++; 
+  unsigned long interval = now - lastPulseTime2;
+  if (interval > 5000) {
+    pulsePeriod2 = interval; 
     lastPulseTime2 = now;
   }
 }
@@ -131,18 +135,27 @@ void loop() {
 
   unsigned long now = millis();
   if (now - lastSendTime >= 100) {
-    unsigned long dt = now - lastSendTime;
     lastSendTime = now;
 
+    // Safely copy RPM periods
     noInterrupts(); 
-    unsigned long pulses1 = rpmPulses1;
-    unsigned long pulses2 = rpmPulses2;
-    rpmPulses1 = 0;
-    rpmPulses2 = 0;
+    unsigned long p1 = pulsePeriod1;
+    unsigned long p2 = pulsePeriod2;
+    unsigned long t1 = lastPulseTime1;
+    unsigned long t2 = lastPulseTime2;
     interrupts();
 
-    float currentRpm1 = (pulses1 / PULSES_PER_REV * 60000.0) / dt;
-    float currentRpm2 = (pulses2 / PULSES_PER_REV * 60000.0) / dt;
+    float currentRpm1 = 0;
+    float currentRpm2 = 0;
+    unsigned long currentMicros = micros();
+
+    // Calculate RPM from period. Time out and drop to 0 RPM if no pulse in the last 2 seconds.
+    if ((currentMicros - t1 < 2000000) && p1 > 0) {
+      currentRpm1 = 60000000.0 / p1;
+    }
+    if ((currentMicros - t2 < 2000000) && p2 > 0) {
+      currentRpm2 = 60000000.0 / p2;
+    }
 
     if (thrustFront.is_ready()) valThrust1 = thrustFront.get_units(1);
     if (torqueFront.is_ready()) valTorque1 = torqueFront.get_units(1);

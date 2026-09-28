@@ -89,7 +89,7 @@ namespace DynamometerGUI
             stopHoldTimer.Tick += StopHoldTimer_Tick;
 
             InitializeGraphAxes();
-            RefreshAllPlots();
+            RefreshVisiblePlots();
             LoadLogFiles();
             
             arduinoPort = new SerialPort("COM3", 115200);
@@ -108,9 +108,6 @@ namespace DynamometerGUI
         {
             string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
             var latestFile = Directory.GetFiles(targetDir, "Calibration_*.csv").OrderByDescending(f => f).FirstOrDefault();
-            
-            SendCommand("TARE_ALL");
-            System.Threading.Thread.Sleep(500); // Give the Arduino time to tare before applying scales
 
             if (latestFile != null)
             {
@@ -282,19 +279,45 @@ namespace DynamometerGUI
                         double minX = liveGraphTime < 30 ? 0 : liveGraphTime - 30;
                         double maxX = liveGraphTime < 30 ? 60 : liveGraphTime + 30;
 
-                        var plots = new[] { PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle, PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP, PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP };
-                        var currentVals = new[] { displayThrust1, torque1, rpm1, displayThrust1, torque1, rpm1, displayThrust2, torque2, rpm2 };
-
-                        for (int i = 0; i < plots.Length; i++)
+                        if (TabSingle.IsSelected)
                         {
-                            var p = plots[i];
-                            if (p != null)
+                            var activePlots = new[] { PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle };
+                            var activeVals = new[] { displayThrust1, torque1, rpm1 };
+
+                            for (int i = 0; i < activePlots.Length; i++)
                             {
+                                var p = activePlots[i];
                                 p.Plot.Axes.SetLimitsX(minX, maxX);
-                                var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
-                                if (currentVals[i] >= yRange.Max || currentVals[i] <= yRange.Min)
+                                
+                                // Disable AutoScale for RPM (Index 2)
+                                if (i != 2) 
                                 {
-                                    p.Plot.Axes.AutoScaleY();
+                                    var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
+                                    if (activeVals[i] >= yRange.Max || activeVals[i] <= yRange.Min)
+                                    {
+                                        p.Plot.Axes.AutoScaleY();
+                                    }
+                                }
+                            }
+                        }
+                        else if (TabCRP.IsSelected)
+                        {
+                            var activePlots = new[] { PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP, PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP };
+                            var activeVals = new[] { displayThrust1, torque1, rpm1, displayThrust2, torque2, rpm2 };
+
+                            for (int i = 0; i < activePlots.Length; i++)
+                            {
+                                var p = activePlots[i];
+                                p.Plot.Axes.SetLimitsX(minX, maxX);
+                                
+                                // Disable AutoScale for RPM (Indices 2 and 5)
+                                if (i != 2 && i != 5) 
+                                {
+                                    var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
+                                    if (activeVals[i] >= yRange.Max || activeVals[i] <= yRange.Min)
+                                    {
+                                        p.Plot.Axes.AutoScaleY();
+                                    }
                                 }
                             }
                         }
@@ -312,6 +335,8 @@ namespace DynamometerGUI
                         TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
                         TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
                         TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
+
+                        RefreshVisiblePlots(); 
                     });
                 }
             }
@@ -405,8 +430,6 @@ namespace DynamometerGUI
                     nextLogInterval += 0.5;
                 }
             }
-
-            RefreshAllPlots();
         }
 
         private void StopRecording()
@@ -737,7 +760,7 @@ namespace DynamometerGUI
                     if (l != null) l.Color = ScottPlot.Colors.Blue;
                 }
             }
-            RefreshAllPlots();
+            RefreshVisiblePlots();
         }
 
         private void CmbThrustUnit_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -747,14 +770,27 @@ namespace DynamometerGUI
             PlotFrontThrustSingle.Plot.YLabel(unitLabel);
             PlotFrontThrustCRP.Plot.YLabel(unitLabel);
             PlotBackThrustCRP.Plot.YLabel(unitLabel);
-            RefreshAllPlots();
+            RefreshVisiblePlots();
         }
 
-        private void RefreshAllPlots()
+        private void RefreshVisiblePlots()
         {
-            PlotFrontThrustSingle.Refresh(); PlotFrontTorqueSingle.Refresh(); PlotFrontRPMSingle.Refresh();
-            PlotFrontThrustCRP.Refresh(); PlotFrontTorqueCRP.Refresh(); PlotFrontRPMCRP.Refresh();
-            PlotBackThrustCRP.Refresh(); PlotBackTorqueCRP.Refresh(); PlotBackRPMCRP.Refresh();
+            // Massive performance gain: Only forces WPF to redraw the graphs that are actually on screen
+            if (TabSingle.IsSelected)
+            {
+                PlotFrontThrustSingle.Refresh();
+                PlotFrontTorqueSingle.Refresh();
+                PlotFrontRPMSingle.Refresh();
+            }
+            else if (TabCRP.IsSelected)
+            {
+                PlotFrontThrustCRP.Refresh();
+                PlotFrontTorqueCRP.Refresh();
+                PlotFrontRPMCRP.Refresh();
+                PlotBackThrustCRP.Refresh();
+                PlotBackTorqueCRP.Refresh();
+                PlotBackRPMCRP.Refresh();
+            }
         }
 
         public void SendCommand(string command)
