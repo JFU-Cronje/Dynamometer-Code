@@ -93,13 +93,15 @@ namespace DynamometerGUI
             LoadLogFiles();
             
             arduinoPort = new SerialPort("COM3", 115200);
+            arduinoPort.WriteTimeout = 50; // Prevent UI deadlock on USB crash
+            
             try 
             {
                  arduinoPort.DtrEnable = true;
                  arduinoPort.Open();
                  arduinoPort.DataReceived += ArduinoPort_DataReceived;
                  
-                 LoadLatestCalibration(); // Load right on startup based on the active tab (Single default)
+                 LoadLatestCalibration(); 
             }
             catch { MessageBox.Show("Could not open COM3. Verify the Arduino Uno is plugged in."); }
         }
@@ -795,7 +797,31 @@ namespace DynamometerGUI
 
         public void SendCommand(string command)
         {
-            if (arduinoPort != null && arduinoPort.IsOpen) arduinoPort.Write(command + "\n");
+            try
+            {
+                if (arduinoPort != null && arduinoPort.IsOpen)
+                {
+                    arduinoPort.Write(command + "\n");
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
+            {
+                // Force close the deadlocked port to free the UI thread if the USB crashes
+                if (arduinoPort != null && arduinoPort.IsOpen)
+                {
+                    try { arduinoPort.Close(); } catch { }
+                }
+                
+                Dispatcher.Invoke(() => 
+                {
+                    ChkActivateSingle.IsChecked = false;
+                    ChkActivateCRP.IsChecked = false;
+                    isAutoRunning = false;
+                    targetThrottle1 = 0;
+                    targetThrottle2 = 0;
+                    StopRecording();
+                });
+            }
         }
 
         private void SldAutoStepsSingle_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
