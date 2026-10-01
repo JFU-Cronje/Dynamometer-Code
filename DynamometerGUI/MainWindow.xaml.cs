@@ -259,7 +259,7 @@ namespace DynamometerGUI
                     mechPower2 = torque2 * rpm2 * (2.0 * Math.PI / 60.0);
                     motorEff2 = elecPower2 > 0 ? (mechPower2 / elecPower2) * 100.0 : 0;
 
-                    Dispatcher.Invoke(() =>
+                    Dispatcher.BeginInvoke(new Action(() =>
                     {
                         liveGraphTime += 0.1; 
 
@@ -291,7 +291,6 @@ namespace DynamometerGUI
                                 var p = activePlots[i];
                                 p.Plot.Axes.SetLimitsX(minX, maxX);
                                 
-                                // Disable AutoScale for RPM (Index 2)
                                 if (i != 2) 
                                 {
                                     var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
@@ -312,7 +311,6 @@ namespace DynamometerGUI
                                 var p = activePlots[i];
                                 p.Plot.Axes.SetLimitsX(minX, maxX);
                                 
-                                // Disable AutoScale for RPM (Indices 2 and 5)
                                 if (i != 2 && i != 5) 
                                 {
                                     var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
@@ -339,7 +337,7 @@ namespace DynamometerGUI
                         TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
 
                         RefreshVisiblePlots(); 
-                    });
+                    }));
                 }
             }
             catch { }

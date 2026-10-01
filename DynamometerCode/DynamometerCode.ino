@@ -1,12 +1,6 @@
-#include "HX711.h"
 #include "Servo.h"
 #include <Wire.h>
-
-// Load Cells
-HX711 thrustFront;
-HX711 torqueFront;
-HX711 thrustBack;
-HX711 torqueBack;
+// #include "HX711.h"
 
 // ESCs
 Servo escFront;
@@ -14,27 +8,16 @@ Servo escBack;
 
 // Pin Mappings
 const int pinRpm1 = 2;        
-const int pinRpm2 = 3;        
-const int pinEsc1 = 9;        
-const int pinEsc2 = 10;       
-const int hxThrust1Dat = 4;   
-const int hxThrust1Clk = 5;   
-const int hxTorque1Dat = 6;   
-const int hxTorque1Clk = 7;   
-const int hxThrust2Dat = 8;   
-const int hxThrust2Clk = 11;  
-const int hxTorque2Dat = 12;  
-const int hxTorque2Clk = A0;  
+const int pinRpm2 = 3; 
+const int pinEsc1 = 10;
+const int pinEsc2 = 13;
+const int pinEscCal = A3;
 
-// Calibration & Safety Pins
-const int pinEscCal = A3;      // Ground this pin during boot to run ESC Calibration
+// I2C Addresses (Dynamically Assigned)
+uint8_t addrFront = 0;
+uint8_t addrBack = 0;
 
-// System Constants
-const float PULSES_PER_REV = 1.0;           
-const float TORQUE_ARM_LENGTH_METERS = 1.0; 
-const float ACS724_SENSITIVITY = 0.200;     // 200mV/A for ACS724-20AU unidirectional sensor
-
-// RPM Tracking with Debounce (Period Measurement)
+// RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
 volatile unsigned long pulsePeriod2 = 0;
 volatile unsigned long lastPulseTime1 = 0;
@@ -42,21 +25,15 @@ volatile unsigned long lastPulseTime2 = 0;
 unsigned long lastSendTime = 0;
 
 // Safety & Latching State
+String inputBuffer = "";
 bool systemArmed = false;
-unsigned long lastValidCmdMs = 0;
 float currentOutputT1 = 0;
 float currentOutputT2 = 0;
-float lastWrittenT1 = -1.0; // Tracks what was physically sent to the ESC
-float lastWrittenT2 = -1.0;
-
-// Non-blocking Load Cell Cache
-float valThrust1 = 0, valTorque1 = 0, valThrust2 = 0, valTorque2 = 0;
 
 // Interrupt Service Routines for KE0068 (Active LOW on White)
 void countRpm1() { 
   unsigned long now = micros();
   unsigned long interval = now - lastPulseTime1;
-  // 5000us debounce caps the maximum readable RPM at 12,000, preventing noise double-triggers
   if (interval > 5000) {
     pulsePeriod1 = interval; 
     lastPulseTime1 = now;
@@ -73,18 +50,33 @@ void countRpm2() {
 }
 
 // ==========================================================
-// I2C Voltage Read Helper
+// I2C Voltage Setup and Read
 // ==========================================================
+void initINA226(uint8_t address) {
+  Wire.beginTransmission(address);
+  Wire.write(0x00); // Configuration Register
+  Wire.write(0x41); // MSB: 0x4127 configures continuous shunt and bus voltage
+  Wire.write(0x27); // LSB
+  Wire.endTransmission();
+}
+
 float readINA226Voltage(uint8_t address) {
   Wire.beginTransmission(address);
   Wire.write(0x02); // Bus Voltage Register
-  Wire.endTransmission();
+  
+  // Return -1.0 if the device does not acknowledge the I2C address
+  if (Wire.endTransmission() != 0) {
+    return -1.0; 
+  }
+  
   Wire.requestFrom(address, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint16_t val = (Wire.read() << 8) | Wire.read();
     return val * 0.00125; // 1.25mV per LSB
   }
-  return 0.0;
+  
+  // Return -2.0 if the device acknowledged but failed to send 2 bytes
+  return -2.0; 
 }
 
 // ==========================================================
@@ -92,7 +84,7 @@ float readINA226Voltage(uint8_t address) {
 // ==========================================================
 bool calibrationRequested() {
   pinMode(pinEscCal, INPUT_PULLUP);
-  Serial.println("Ground Pin 8 within 3s to calibrate ESC...");
+  Serial.println("Ground Pin A3 within 3s to calibrate ESC...");
   uint32_t t0 = millis();
   while (millis() - t0 < 3000) {
     if (digitalRead(pinEscCal) == LOW) {
@@ -108,7 +100,7 @@ void runEscCalibration() {
   escFront.writeMicroseconds(1900);
   escBack.writeMicroseconds(1900);
   Serial.println("Output at MAX (1900us). Connect battery, wait for '123' then 'beep-beep'.");
-  Serial.println("Remove ground from Pin 8 to proceed to MIN.");
+  Serial.println("Remove ground from Pin A3 to proceed to MIN.");
   
   uint32_t t0 = millis();
   while (digitalRead(pinEscCal) == LOW) {
@@ -127,13 +119,30 @@ void runEscCalibration() {
 
 void setup() {
   Serial.begin(115200);
+  
+  // --- ENABLE I2C AND DYNAMIC SCANNER ---
   Wire.begin(); 
-  Wire.setWireTimeout(25000, true); // Prevents I2C hangs from triggering the 500ms safety cutoff
+  Wire.setWireTimeout(5000, true); 
 
-  thrustFront.begin(hxThrust1Dat, hxThrust1Clk);
-  torqueFront.begin(hxTorque1Dat, hxTorque1Clk);
-  thrustBack.begin(hxThrust2Dat, hxThrust2Clk);
-  torqueBack.begin(hxTorque2Dat, hxTorque2Clk);
+  Serial.println("Scanning I2C bus for INA226 modules...");
+  for (uint8_t i = 0x40; i <= 0x4F; i++) {
+    Wire.beginTransmission(i);
+    if (Wire.endTransmission() == 0) {
+      if (addrFront == 0) {
+        addrFront = i;
+        initINA226(addrFront);
+        Serial.print("-> Found INA226 (Front) at 0x"); Serial.println(addrFront, HEX);
+      } else if (addrBack == 0) {
+        addrBack = i;
+        initINA226(addrBack);
+        Serial.print("-> Found INA226 (Back) at 0x"); Serial.println(addrBack, HEX);
+      }
+    }
+  }
+
+  if (addrFront == 0) {
+    Serial.println("-> ERROR: No INA226 found! Check A0/A1 pins and SDA/SCL wiring.");
+  }
 
   escFront.attach(pinEsc1, 1100, 1900);
   escBack.attach(pinEsc2, 1100, 1900);
@@ -149,22 +158,15 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
 
-  Serial.println("Dynamometer Hardware Initialized");
-  lastValidCmdMs = millis();
+  Serial.println("Dynamometer Hardware Initialized - RPM + VOLTAGE ONLY");
 }
 
-// Add this global variable right above your loop() function:
-String inputBuffer = "";
-
 void loop() {
-  // --- NON-BLOCKING SERIAL PARSER ---
   while (Serial.available() > 0) {
     char c = Serial.read();
     if (c == '\n') {
       inputBuffer.trim();
-      lastValidCmdMs = millis(); // Refresh safety timeout
       
-      // PC Throttle commands map 0-100 % into 1100-1900 Microseconds
       if (inputBuffer.startsWith("T1_")) {
         float throttlePct = inputBuffer.substring(3).toFloat();
         if (throttlePct < 0.0) throttlePct = 0.0;
@@ -176,7 +178,6 @@ void loop() {
         if (throttlePct > 100.0) throttlePct = 100.0;
         currentOutputT2 = throttlePct;
       } 
-      // Latching and Safety Commands
       else if (inputBuffer == "UNLOCK_SINGLE" || inputBuffer == "UNLOCK_CRP") {
         systemArmed = true;
       } else if (inputBuffer == "LOCK_SINGLE" || inputBuffer == "LOCK_CRP" || inputBuffer == "STOP_ALL") {
@@ -184,66 +185,21 @@ void loop() {
         currentOutputT1 = 0.0;
         currentOutputT2 = 0.0;
       }
-      // Manual Scale Application
-      else if (inputBuffer.startsWith("S_T1_")) { thrustFront.set_scale(inputBuffer.substring(5).toFloat()); }
-      else if (inputBuffer.startsWith("S_Q1_")) { torqueFront.set_scale(inputBuffer.substring(5).toFloat()); }
-      else if (inputBuffer.startsWith("S_T2_")) { thrustBack.set_scale(inputBuffer.substring(5).toFloat()); }
-      else if (inputBuffer.startsWith("S_Q2_")) { torqueBack.set_scale(inputBuffer.substring(5).toFloat()); }
-      // Global Tare
-      else if (inputBuffer == "TARE_ALL") {
-        thrustFront.tare(30); torqueFront.tare(30);
-        thrustBack.tare(30); torqueBack.tare(30);
-      }
-      // Calibration 
-      else if (inputBuffer == "A") { thrustFront.tare(30); }
-      else if (inputBuffer == "B") { 
-        thrustFront.set_scale(thrustFront.get_value(30) / 4.903325); 
-        Serial.print("CAL:T1:"); Serial.println(thrustFront.get_scale(), 4);
-      } 
-      else if (inputBuffer == "C") { torqueFront.tare(30); }
-      else if (inputBuffer == "D") { 
-        torqueFront.set_scale(torqueFront.get_value(30) / (4.903325 * TORQUE_ARM_LENGTH_METERS)); 
-        Serial.print("CAL:Q1:"); Serial.println(torqueFront.get_scale(), 4);
-      }
-      else if (inputBuffer == "E") { thrustBack.tare(30); }
-      else if (inputBuffer == "F") { 
-        thrustBack.set_scale(thrustBack.get_value(30) / 4.903325); 
-        Serial.print("CAL:T2:"); Serial.println(thrustBack.get_scale(), 4);
-      }
-      else if (inputBuffer == "G") { torqueBack.tare(30); }
-      else if (inputBuffer == "H") { 
-        torqueBack.set_scale(torqueBack.get_value(30) / (4.903325 * TORQUE_ARM_LENGTH_METERS)); 
-        Serial.print("CAL:Q2:"); Serial.println(torqueBack.get_scale(), 4);
-      }
       
-      inputBuffer = ""; // Clear buffer for next command
+      inputBuffer = ""; 
     } else {
-      inputBuffer += c; // Append character to buffer
+      inputBuffer += c; 
     }
   }
 
-  // --- HARDWARE SAFETY OVERRIDE ---
-  bool isTimeout = (millis() - lastValidCmdMs > 500);
-
-  if (!systemArmed || isTimeout) {
-    // Only interrupt the Servo library if the output isn't already 0%
-    if (lastWrittenT1 != 0.0 || lastWrittenT2 != 0.0) {
-      escFront.writeMicroseconds(1100);
-      escBack.writeMicroseconds(1100);
-      lastWrittenT1 = 0.0;
-      lastWrittenT2 = 0.0;
-    }
+  if (!systemArmed) {
+    escFront.writeMicroseconds(1100);
+    escBack.writeMicroseconds(1100);
   } else {
-    // Only interrupt the Servo library if the PC commanded a NEW throttle value
-    if (lastWrittenT1 != currentOutputT1 || lastWrittenT2 != currentOutputT2) {
-      escFront.writeMicroseconds(1100 + (currentOutputT1 * 8.0));
-      escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
-      lastWrittenT1 = currentOutputT1;
-      lastWrittenT2 = currentOutputT2;
-    }
+    escFront.writeMicroseconds(1100 + (currentOutputT1 * 8.0));
+    escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
   }
 
-  // --- SENSOR POLLING (10Hz) ---
   unsigned long now = millis();
   if (now - lastSendTime >= 100) {
     lastSendTime = now;
@@ -266,29 +222,18 @@ void loop() {
       currentRpm2 = 60000000.0 / p2;
     }
 
-    if (thrustFront.is_ready()) valThrust1 = thrustFront.get_units(1);
-    if (torqueFront.is_ready()) valTorque1 = torqueFront.get_units(1);
-    if (thrustBack.is_ready())  valThrust2 = thrustBack.get_units(1);
-    if (torqueBack.is_ready())  valTorque2 = torqueBack.get_units(1);
+    // Map the active addresses instead of hardcoding 0x40 and 0x41
+    float valVolt1 = (addrFront != 0) ? readINA226Voltage(addrFront) : -1.0;
+    float valVolt2 = (addrBack != 0) ? readINA226Voltage(addrBack) : -1.0;
 
-    float valVolt1 = readINA226Voltage(0x40);
-    float valVolt2 = readINA226Voltage(0x41);
-
-    float rawA1 = analogRead(A1) * (5.0 / 1023.0);
-    float valCurr1 = abs((rawA1 - 0.5) / ACS724_SENSITIVITY);
-    
-    float rawA2 = analogRead(A2) * (5.0 / 1023.0);
-    float valCurr2 = abs((rawA2 - 0.5) / ACS724_SENSITIVITY);
-
-    Serial.print(valThrust1, 3); Serial.print(",");
-    Serial.print(valTorque1, 3); Serial.print(",");
-    Serial.print(currentRpm1, 0); Serial.print(",");
-    Serial.print(valVolt1, 2); Serial.print(","); 
-    Serial.print(valCurr1, 2); Serial.print(","); 
-    Serial.print(valThrust2, 3); Serial.print(",");
-    Serial.print(valTorque2, 3); Serial.print(",");
-    Serial.print(currentRpm2, 0); Serial.print(",");
-    Serial.print(valVolt2, 2); Serial.print(","); 
-    Serial.println(valCurr2, 2);                  
+    Serial.print("0.000,0.000,");
+    Serial.print(currentRpm1, 0); 
+    Serial.print(",");
+    Serial.print(valVolt1, 2); 
+    Serial.print(",0.00,0.000,0.000,");
+    Serial.print(currentRpm2, 0); 
+    Serial.print(",");
+    Serial.print(valVolt2, 2);
+    Serial.println(",0.00");                  
   }
 }
