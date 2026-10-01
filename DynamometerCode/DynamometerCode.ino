@@ -46,6 +46,8 @@ bool systemArmed = false;
 unsigned long lastValidCmdMs = 0;
 float currentOutputT1 = 0;
 float currentOutputT2 = 0;
+float lastWrittenT1 = -1.0; // Tracks what was physically sent to the ESC
+float lastWrittenT2 = -1.0;
 
 // Non-blocking Load Cell Cache
 float valThrust1 = 0, valTorque1 = 0, valThrust2 = 0, valTorque2 = 0;
@@ -151,77 +153,94 @@ void setup() {
   lastValidCmdMs = millis();
 }
 
-void loop() {
-  // Empty the entire serial buffer to prevent command lag and 500ms safety timeouts
-  while (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    lastValidCmdMs = millis(); // Refresh safety timeout
-    
-    // PC Throttle commands map 0-100 % into 1100-1900 Microseconds with validation
-    if (cmd.startsWith("T1_")) {
-      float throttlePct = cmd.substring(3).toFloat();
-      if (throttlePct < 0.0) throttlePct = 0.0;
-      if (throttlePct > 100.0) throttlePct = 100.0;
-      currentOutputT1 = throttlePct;
-    } else if (cmd.startsWith("T2_")) {
-      float throttlePct = cmd.substring(3).toFloat();
-      if (throttlePct < 0.0) throttlePct = 0.0;
-      if (throttlePct > 100.0) throttlePct = 100.0;
-      currentOutputT2 = throttlePct;
-    } 
-    // Latching and Safety Commands
-    else if (cmd == "UNLOCK_SINGLE" || cmd == "UNLOCK_CRP") {
-      systemArmed = true;
-    } else if (cmd == "LOCK_SINGLE" || cmd == "LOCK_CRP" || cmd == "STOP_ALL") {
-      systemArmed = false;
-      currentOutputT1 = 0.0;
-      currentOutputT2 = 0.0;
-    }
-    // Manual Scale Application
-    else if (cmd.startsWith("S_T1_")) { thrustFront.set_scale(cmd.substring(5).toFloat()); }
-    else if (cmd.startsWith("S_Q1_")) { torqueFront.set_scale(cmd.substring(5).toFloat()); }
-    else if (cmd.startsWith("S_T2_")) { thrustBack.set_scale(cmd.substring(5).toFloat()); }
-    else if (cmd.startsWith("S_Q2_")) { torqueBack.set_scale(cmd.substring(5).toFloat()); }
-    // Global Tare
-    else if (cmd == "TARE_ALL") {
-      thrustFront.tare(30); torqueFront.tare(30);
-      thrustBack.tare(30); torqueBack.tare(30);
-    }
-    
-    // Calibration 
-    float calForceN = 4.903325; // Force of 500g mass
-    float calTorqueNm = calForceN * TORQUE_ARM_LENGTH_METERS;
+// Add this global variable right above your loop() function:
+String inputBuffer = "";
 
-    if (cmd == "A") { thrustFront.tare(30); }
-    else if (cmd == "B") { 
-      thrustFront.set_scale(thrustFront.get_value(30) / calForceN); 
-      Serial.print("CAL:T1:"); Serial.println(thrustFront.get_scale(), 4);
-    } 
-    else if (cmd == "C") { torqueFront.tare(30); }
-    else if (cmd == "D") { 
-      torqueFront.set_scale(torqueFront.get_value(30) / calTorqueNm); 
-      Serial.print("CAL:Q1:"); Serial.println(torqueFront.get_scale(), 4);
-    }
-    else if (cmd == "E") { thrustBack.tare(30); }
-    else if (cmd == "F") { 
-      thrustBack.set_scale(thrustBack.get_value(30) / calForceN); 
-      Serial.print("CAL:T2:"); Serial.println(thrustBack.get_scale(), 4);
-    }
-    else if (cmd == "G") { torqueBack.tare(30); }
-    else if (cmd == "H") { 
-      torqueBack.set_scale(torqueBack.get_value(30) / calTorqueNm); 
-      Serial.print("CAL:Q2:"); Serial.println(torqueBack.get_scale(), 4);
+void loop() {
+  // --- NON-BLOCKING SERIAL PARSER ---
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      inputBuffer.trim();
+      lastValidCmdMs = millis(); // Refresh safety timeout
+      
+      // PC Throttle commands map 0-100 % into 1100-1900 Microseconds
+      if (inputBuffer.startsWith("T1_")) {
+        float throttlePct = inputBuffer.substring(3).toFloat();
+        if (throttlePct < 0.0) throttlePct = 0.0;
+        if (throttlePct > 100.0) throttlePct = 100.0;
+        currentOutputT1 = throttlePct;
+      } else if (inputBuffer.startsWith("T2_")) {
+        float throttlePct = inputBuffer.substring(3).toFloat();
+        if (throttlePct < 0.0) throttlePct = 0.0;
+        if (throttlePct > 100.0) throttlePct = 100.0;
+        currentOutputT2 = throttlePct;
+      } 
+      // Latching and Safety Commands
+      else if (inputBuffer == "UNLOCK_SINGLE" || inputBuffer == "UNLOCK_CRP") {
+        systemArmed = true;
+      } else if (inputBuffer == "LOCK_SINGLE" || inputBuffer == "LOCK_CRP" || inputBuffer == "STOP_ALL") {
+        systemArmed = false;
+        currentOutputT1 = 0.0;
+        currentOutputT2 = 0.0;
+      }
+      // Manual Scale Application
+      else if (inputBuffer.startsWith("S_T1_")) { thrustFront.set_scale(inputBuffer.substring(5).toFloat()); }
+      else if (inputBuffer.startsWith("S_Q1_")) { torqueFront.set_scale(inputBuffer.substring(5).toFloat()); }
+      else if (inputBuffer.startsWith("S_T2_")) { thrustBack.set_scale(inputBuffer.substring(5).toFloat()); }
+      else if (inputBuffer.startsWith("S_Q2_")) { torqueBack.set_scale(inputBuffer.substring(5).toFloat()); }
+      // Global Tare
+      else if (inputBuffer == "TARE_ALL") {
+        thrustFront.tare(30); torqueFront.tare(30);
+        thrustBack.tare(30); torqueBack.tare(30);
+      }
+      // Calibration 
+      else if (inputBuffer == "A") { thrustFront.tare(30); }
+      else if (inputBuffer == "B") { 
+        thrustFront.set_scale(thrustFront.get_value(30) / 4.903325); 
+        Serial.print("CAL:T1:"); Serial.println(thrustFront.get_scale(), 4);
+      } 
+      else if (inputBuffer == "C") { torqueFront.tare(30); }
+      else if (inputBuffer == "D") { 
+        torqueFront.set_scale(torqueFront.get_value(30) / (4.903325 * TORQUE_ARM_LENGTH_METERS)); 
+        Serial.print("CAL:Q1:"); Serial.println(torqueFront.get_scale(), 4);
+      }
+      else if (inputBuffer == "E") { thrustBack.tare(30); }
+      else if (inputBuffer == "F") { 
+        thrustBack.set_scale(thrustBack.get_value(30) / 4.903325); 
+        Serial.print("CAL:T2:"); Serial.println(thrustBack.get_scale(), 4);
+      }
+      else if (inputBuffer == "G") { torqueBack.tare(30); }
+      else if (inputBuffer == "H") { 
+        torqueBack.set_scale(torqueBack.get_value(30) / (4.903325 * TORQUE_ARM_LENGTH_METERS)); 
+        Serial.print("CAL:Q2:"); Serial.println(torqueBack.get_scale(), 4);
+      }
+      
+      inputBuffer = ""; // Clear buffer for next command
+    } else {
+      inputBuffer += c; // Append character to buffer
     }
   }
 
   // --- HARDWARE SAFETY OVERRIDE ---
-  if (!systemArmed || (millis() - lastValidCmdMs > 500)) {
-    escFront.writeMicroseconds(1100);
-    escBack.writeMicroseconds(1100);
+  bool isTimeout = (millis() - lastValidCmdMs > 500);
+
+  if (!systemArmed || isTimeout) {
+    // Only interrupt the Servo library if the output isn't already 0%
+    if (lastWrittenT1 != 0.0 || lastWrittenT2 != 0.0) {
+      escFront.writeMicroseconds(1100);
+      escBack.writeMicroseconds(1100);
+      lastWrittenT1 = 0.0;
+      lastWrittenT2 = 0.0;
+    }
   } else {
-    escFront.writeMicroseconds(1100 + (currentOutputT1 * 8.0));
-    escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
+    // Only interrupt the Servo library if the PC commanded a NEW throttle value
+    if (lastWrittenT1 != currentOutputT1 || lastWrittenT2 != currentOutputT2) {
+      escFront.writeMicroseconds(1100 + (currentOutputT1 * 8.0));
+      escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
+      lastWrittenT1 = currentOutputT1;
+      lastWrittenT2 = currentOutputT2;
+    }
   }
 
   // --- SENSOR POLLING (10Hz) ---
@@ -252,18 +271,15 @@ void loop() {
     if (thrustBack.is_ready())  valThrust2 = thrustBack.get_units(1);
     if (torqueBack.is_ready())  valTorque2 = torqueBack.get_units(1);
 
-    // INA226 Voltage (I2C)
     float valVolt1 = readINA226Voltage(0x40);
     float valVolt2 = readINA226Voltage(0x41);
 
-    // ACS724 Current (Analog) - Unidirectional Offset (0.5V)
     float rawA1 = analogRead(A1) * (5.0 / 1023.0);
     float valCurr1 = abs((rawA1 - 0.5) / ACS724_SENSITIVITY);
     
     float rawA2 = analogRead(A2) * (5.0 / 1023.0);
     float valCurr2 = abs((rawA2 - 0.5) / ACS724_SENSITIVITY);
 
-    // Send formatted string to GUI
     Serial.print(valThrust1, 3); Serial.print(",");
     Serial.print(valTorque1, 3); Serial.print(",");
     Serial.print(currentRpm1, 0); Serial.print(",");
