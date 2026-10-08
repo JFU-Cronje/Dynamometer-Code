@@ -1,6 +1,6 @@
 #include "Servo.h"
 #include <Wire.h>
-// #include "HX711.h"
+#include "HX711.h"
 
 // ESCs
 Servo escFront;
@@ -12,10 +12,13 @@ const int pinRpm2 = 3;
 const int pinEsc1 = 10;
 const int pinEsc2 = 13;
 const int pinEscCal = A3;
+const int pinCurr1 = A1; // Adjust to your actual analog pin
+const int pinCurr2 = A2; // Adjust to your actual analog pin
+const int pinThrust1_DT = 4;
+const int pinThrust1_SCK = 5;
 
-// I2C Addresses (Dynamically Assigned)
-uint8_t addrFront = 0;
-uint8_t addrBack = 0;
+// Load Cell Object
+HX711 loadCellThrust1;
 
 // RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
@@ -55,8 +58,8 @@ void countRpm2() {
 void initINA226(uint8_t address) {
   Wire.beginTransmission(address);
   Wire.write(0x00); // Configuration Register
-  Wire.write(0x41); // MSB: 0x4127 configures continuous shunt and bus voltage
-  Wire.write(0x27); // LSB
+  Wire.write(0x47); // MSB: 0x4727 configures 64x hardware averaging
+  Wire.write(0x27); // LSB: 1.1ms conversion time, continuous mode
   Wire.endTransmission();
 }
 
@@ -64,19 +67,52 @@ float readINA226Voltage(uint8_t address) {
   Wire.beginTransmission(address);
   Wire.write(0x02); // Bus Voltage Register
   
-  // Return -1.0 if the device does not acknowledge the I2C address
   if (Wire.endTransmission() != 0) {
     return -1.0; 
   }
   
+  delay(1);
+  
   Wire.requestFrom(address, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint16_t val = (Wire.read() << 8) | Wire.read();
-    return val * 0.00125; // 1.25mV per LSB
+    float rawVoltage = val * 0.00125; // 1.25mV per LSB
+    
+    // Apply proportional scale factor instead of static offset
+    // Multiplier = Actual (13.97) / Raw (14.69) = ~0.95098
+    float calibratedVoltage = rawVoltage * 0.95098; 
+    
+    if (calibratedVoltage < 0.0) return 0.0;
+    
+    return calibratedVoltage;
   }
   
-  // Return -2.0 if the device acknowledged but failed to send 2 bytes
   return -2.0; 
+}
+
+// ==========================================================
+// Analog Current Read (ACS724-20AU Unidirectional)
+// ==========================================================
+float readACS724Current(int pin) {
+  // Take an average of 10 samples to smooth out motor noise
+  long sum = 0;
+  for (int i = 0; i < 10; i++) {
+    sum += analogRead(pin);
+  }
+  float avgRaw = sum / 10.0;
+  
+  // Convert 10-bit ADC value (0-1023) to Voltage (0-5V)
+  float voltage = avgRaw * (5.0 / 1023.0);
+  
+  // For ACS724-20AU (Unidirectional): Offset = 0.5V, Sensitivity = 0.200 V/A
+  float current = (voltage - 0.5) / 0.200;
+  
+  // Filter out floating noise around 0 Amps
+  if (current < 0.15 && current > -0.15) {
+    return 0.0;
+  }
+  
+  return current;
 }
 
 // ==========================================================
@@ -120,29 +156,23 @@ void runEscCalibration() {
 void setup() {
   Serial.begin(115200);
   
-  // --- ENABLE I2C AND DYNAMIC SCANNER ---
   Wire.begin(); 
-  Wire.setWireTimeout(5000, true); 
+  Wire.setWireTimeout(25000, true); 
 
-  Serial.println("Scanning I2C bus for INA226 modules...");
-  for (uint8_t i = 0x40; i <= 0x4F; i++) {
+  // Run a definitive I2C scan at boot to confirm the physical address
+  Serial.println("--- I2C SCAN START ---");
+  for (byte i = 8; i < 120; i++) {
     Wire.beginTransmission(i);
     if (Wire.endTransmission() == 0) {
-      if (addrFront == 0) {
-        addrFront = i;
-        initINA226(addrFront);
-        Serial.print("-> Found INA226 (Front) at 0x"); Serial.println(addrFront, HEX);
-      } else if (addrBack == 0) {
-        addrBack = i;
-        initINA226(addrBack);
-        Serial.print("-> Found INA226 (Back) at 0x"); Serial.println(addrBack, HEX);
-      }
+      Serial.print("Device found at 0x");
+      Serial.println(i, HEX);
     }
   }
+  Serial.println("--- I2C SCAN END ---");
 
-  if (addrFront == 0) {
-    Serial.println("-> ERROR: No INA226 found! Check A0/A1 pins and SDA/SCL wiring.");
-  }
+  // Explicitly initialize the known addresses
+  initINA226(0x44); // Updated from 0x40
+  initINA226(0x41); // Update this to 0x45 if your second sensor is similarly configured
 
   escFront.attach(pinEsc1, 1100, 1900);
   escBack.attach(pinEsc2, 1100, 1900);
@@ -157,6 +187,8 @@ void setup() {
   pinMode(pinRpm2, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
+
+  loadCellThrust1.begin(pinThrust1_DT, pinThrust1_SCK);
 
   Serial.println("Dynamometer Hardware Initialized - RPM + VOLTAGE ONLY");
 }
@@ -222,18 +254,34 @@ void loop() {
       currentRpm2 = 60000000.0 / p2;
     }
 
-    // Map the active addresses instead of hardcoding 0x40 and 0x41
-    float valVolt1 = (addrFront != 0) ? readINA226Voltage(addrFront) : -1.0;
-    float valVolt2 = (addrBack != 0) ? readINA226Voltage(addrBack) : -1.0;
+    // Explicitly poll I2C voltage sensors
+    float valVolt1 = readINA226Voltage(0x44); // Updated from 0x40
+    float valVolt2 = readINA226Voltage(0x41); // Update this to 0x45 if your second sensor is similarly configured
 
-    Serial.print("0.000,0.000,");
+    // Explicitly poll analog current sensors
+    float valCurr1 = readACS724Current(pinCurr1);
+    float valCurr2 = readACS724Current(pinCurr2);
+
+    // Poll Front Thrust Load Cell (1 sample)
+    // NOTE: This library call disables global interrupts internally
+    float valThrust1 = 0.0;
+    if (loadCellThrust1.is_ready()) {
+      valThrust1 = loadCellThrust1.get_units(1); 
+    }
+
+    // Format: Thrust1, Torque1, RPM1, Volt1, Curr1, Thrust2, Torque2, RPM2, Volt2, Curr2
+    Serial.print(valThrust1, 3); // Injected Thrust 1
+    Serial.print(",0.000,");
     Serial.print(currentRpm1, 0); 
     Serial.print(",");
     Serial.print(valVolt1, 2); 
-    Serial.print(",0.00,0.000,0.000,");
+    Serial.print(",");
+    Serial.print(valCurr1, 2); 
+    Serial.print(",0.000,0.000,");
     Serial.print(currentRpm2, 0); 
     Serial.print(",");
     Serial.print(valVolt2, 2);
-    Serial.println(",0.00");                  
+    Serial.print(",");
+    Serial.println(valCurr2, 2);                
   }
 }
