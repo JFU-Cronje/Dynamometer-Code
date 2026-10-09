@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ScottPlot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
         Name="WindowMain" Title="Dynamometer Control Panel" Height="850" Width="1250"
+        WindowState="Maximized"
         PreviewKeyDown="Window_PreviewKeyDown" PreviewKeyUp="Window_PreviewKeyUp"
         Loaded="Window_Loaded">
     <Window.Resources>
@@ -328,7 +329,10 @@
                                 <TextBox Name="TxtAutoSingle5" Text="50" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoSingle6" Text="60" Width="35" TextAlignment="Center" Visibility="Collapsed"/>
                             </StackPanel>
-                            <Button Name="BtnStartAutoSingle" Content="Start Auto Test" Height="30" IsEnabled="False" Click="BtnStartAutoSingle_Click"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Name="BtnStartAutoSingle" Content="Start Automatic Test" Height="30" Padding="10,0" IsEnabled="False" Click="BtnStartAutoSingle_Click"/>
+                                <TextBlock Name="LblRecordingAutoSingle" Text="Recording Automatic Test..." Foreground="Red" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" Visibility="Hidden"/>
+                            </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
 
@@ -436,7 +440,10 @@
                                 <TextBox Name="TxtAutoBackCRP5" Text="50" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoBackCRP6" Text="60" Width="35" TextAlignment="Center" Visibility="Collapsed"/>
                             </StackPanel>
-                            <Button Name="BtnStartAutoCRP" Content="Start Auto Test" Height="30" IsEnabled="False" Click="BtnStartAutoCRP_Click"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Name="BtnStartAutoCRP" Content="Start Automatic Test" Height="30" Padding="10,0" IsEnabled="False" Click="BtnStartAutoCRP_Click"/>
+                                <TextBlock Name="LblRecordingAutoCRP" Text="Recording Automatic Test..." Foreground="Red" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" Visibility="Hidden"/>
+                            </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
 

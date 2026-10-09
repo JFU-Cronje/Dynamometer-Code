@@ -362,15 +362,24 @@ namespace DynamometerGUI
                 if (autoTimer <= 0)
                 {
                     autoPhase++;
-                    if (autoPhase > autoTotalSteps)
+                    if (autoPhase == autoTotalSteps + 1)
                     {
-                        isAutoRunning = false;
+                        // Phase N+1: The 2-second cooldown buffer at the end of the test
                         targetThrottle1 = 0;
                         targetThrottle2 = 0;
-                        StopRecording();
+                        autoTimer = 2.0; 
+                    }
+                    else if (autoPhase > autoTotalSteps + 1)
+                    {
+                        // Phase N+2: Wait for actual throttle to ramp down to 0% before unlocking UI
+                        if (actualThrottle1 <= 0.1 && actualThrottle2 <= 0.1)
+                        {
+                            StopAutoTest(); 
+                        }
                     }
                     else
                     {
+                        // Active test phases (Phases 1 to N)
                         targetThrottle1 = autoTargetsFront[autoPhase - 1];
                         if (TabCRP.IsSelected) targetThrottle2 = autoTargetsBack[autoPhase - 1];
                         autoTimer = autoStepDuration; 
@@ -427,7 +436,20 @@ namespace DynamometerGUI
                         logThrust2, logTorque2, logRpm2, logVolt2, logCurr2, t2, logElecPower2, logMechPower2, logMotorEff2);
 
                     csvWriter.WriteLine(csvLine);
-                    nextLogInterval += 0.5;
+                    nextLogInterval += 0.1; 
+                }
+            }
+
+            // Manage Auto Test button state (Disable if manual throttle is non-zero)
+            if (!isAutoRunning)
+            {
+                if (ChkActivateSingle.IsChecked == true)
+                {
+                    BtnStartAutoSingle.IsEnabled = (SldThrottleSingle.Value == 0 && actualThrottle1 < 0.1);
+                }
+                if (ChkActivateCRP.IsChecked == true)
+                {
+                    BtnStartAutoCRP.IsEnabled = (SldThrottleFrontCRP.Value == 0 && SldThrottleBackCRP.Value == 0 && actualThrottle1 < 0.1 && actualThrottle2 < 0.1);
                 }
             }
         }
@@ -442,6 +464,34 @@ namespace DynamometerGUI
                 csvWriter?.Close();
                 LoadLogFiles();
             }
+        }
+
+        private void StopAutoTest()
+        {
+            isAutoRunning = false;
+            targetThrottle1 = 0;
+            targetThrottle2 = 0;
+            
+            BtnStartAutoSingle.Content = "Start Auto Test";
+            BtnStartAutoCRP.Content = "Start Auto Test";
+            
+            if (LblRecordingAutoSingle != null) LblRecordingAutoSingle.Visibility = Visibility.Hidden;
+            if (LblRecordingAutoCRP != null) LblRecordingAutoCRP.Visibility = Visibility.Hidden;
+            
+            // Re-enable manual sliders and record buttons if the system is still active
+            if (ChkActivateSingle.IsChecked == true) 
+            {
+                SldThrottleSingle.IsEnabled = true;
+                BtnRecordSingle.IsEnabled = true;
+            }
+            if (ChkActivateCRP.IsChecked == true) 
+            {
+                SldThrottleFrontCRP.IsEnabled = true;
+                SldThrottleBackCRP.IsEnabled = true;
+                BtnRecordCRP.IsEnabled = true;
+            }
+            
+            StopRecording();
         }
 
         private void StopHoldTimer_Tick(object? sender, EventArgs e)
@@ -488,12 +538,12 @@ namespace DynamometerGUI
         {
             ChkActivateSingle.IsChecked = false;
             ChkActivateCRP.IsChecked = false;
-            isAutoRunning = false;
+            if (isAutoRunning) StopAutoTest();
             targetThrottle1 = 0;
             targetThrottle2 = 0;
             StopRecording();
             SendCommand("STOP_ALL");
-        }
+        }   
 
         private void BtnStop_MouseDown(object sender, MouseButtonEventArgs e) { StartStopPress(); }
         private void BtnStop_MouseUp(object sender, MouseButtonEventArgs e) { CancelStopPress(); }
@@ -691,15 +741,27 @@ namespace DynamometerGUI
             if (!isRecording)
             {
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{timestamp}.csv"));
+                string mode = isAutoRunning ? "Auto" : "Manual";
+                csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{mode}_{timestamp}.csv"));
                 csvWriter.AutoFlush = true;
                 csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2");
                 
                 startTime = DateTime.Now;
-                nextLogInterval = 0.5;
+                nextLogInterval = 0.1;
                 isRecording = true;
-                BtnRecordSingle.Content = "Stop Rec";
-                BtnRecordCRP.Content = "Stop Rec";
+                
+                if (isAutoRunning)
+                {
+                    BtnRecordSingle.IsEnabled = false;
+                    BtnRecordCRP.IsEnabled = false;
+                    if (TabSingle.IsSelected && LblRecordingAutoSingle != null) LblRecordingAutoSingle.Visibility = Visibility.Visible;
+                    if (TabCRP.IsSelected && LblRecordingAutoCRP != null) LblRecordingAutoCRP.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    BtnRecordSingle.Content = "Stop Recording";
+                    BtnRecordCRP.Content = "Stop Recording";
+                }
             }
             else StopRecording();
         }
@@ -814,7 +876,7 @@ namespace DynamometerGUI
                 {
                     ChkActivateSingle.IsChecked = false;
                     ChkActivateCRP.IsChecked = false;
-                    isAutoRunning = false;
+                    if (isAutoRunning) StopAutoTest();
                     targetThrottle1 = 0;
                     targetThrottle2 = 0;
                     StopRecording();
@@ -886,6 +948,12 @@ namespace DynamometerGUI
 
         private void BtnStartAutoSingle_Click(object sender, RoutedEventArgs e)
         {
+            if (isAutoRunning)
+            {
+                StopAutoTest();
+                return;
+            }
+
             autoTotalSteps = (int)SldAutoStepsSingle.Value;
             TextBox[] boxes = { TxtAutoSingle1, TxtAutoSingle2, TxtAutoSingle3, TxtAutoSingle4, TxtAutoSingle5, TxtAutoSingle6 };
             
@@ -901,6 +969,11 @@ namespace DynamometerGUI
                 targetThrottle1 = 0;
                 targetThrottle2 = 0;
                 isAutoRunning = true;
+
+                // Update UI state
+                BtnStartAutoSingle.Content = "Stop Auto Test";
+                SldThrottleSingle.IsEnabled = false;
+
                 BtnRecord_Click(sender, e);
             }
             catch { MessageBox.Show("Please enter valid numbers for the step duration and targets."); }
@@ -908,6 +981,12 @@ namespace DynamometerGUI
 
         private void BtnStartAutoCRP_Click(object sender, RoutedEventArgs e)
         {
+            if (isAutoRunning)
+            {
+                StopAutoTest();
+                return;
+            }
+
             autoTotalSteps = (int)SldAutoStepsCRP.Value;
             TextBox[] fBoxes = { TxtAutoFrontCRP1, TxtAutoFrontCRP2, TxtAutoFrontCRP3, TxtAutoFrontCRP4, TxtAutoFrontCRP5, TxtAutoFrontCRP6 };
             TextBox[] bBoxes = { TxtAutoBackCRP1, TxtAutoBackCRP2, TxtAutoBackCRP3, TxtAutoBackCRP4, TxtAutoBackCRP5, TxtAutoBackCRP6 };
@@ -928,6 +1007,12 @@ namespace DynamometerGUI
                 targetThrottle1 = 0;
                 targetThrottle2 = 0;
                 isAutoRunning = true;
+
+                // Update UI state
+                BtnStartAutoCRP.Content = "Stop Auto Test";
+                SldThrottleFrontCRP.IsEnabled = false;
+                SldThrottleBackCRP.IsEnabled = false;
+
                 BtnRecord_Click(sender, e);
             }
             catch { MessageBox.Show("Please enter valid numbers for the step duration and targets."); }

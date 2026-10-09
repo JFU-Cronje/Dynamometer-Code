@@ -1,6 +1,13 @@
 #include "Servo.h"
 #include <Wire.h>
-#include "HX711.h"
+#include <SoftwareSerial.h>
+SoftwareSerial megaSerial(4, 5); // RX on Pin 4, TX on Pin 5 (TX unused but required by library)
+
+String megaBuffer = "";
+float megaThrust1 = 0.000;
+float megaTorque1 = 0.000;
+float megaThrust2 = 0.000;
+float megaTorque2 = 0.000;
 
 // ESCs
 Servo escFront;
@@ -14,11 +21,6 @@ const int pinEsc2 = 13;
 const int pinEscCal = A3;
 const int pinCurr1 = A1; // Adjust to your actual analog pin
 const int pinCurr2 = A2; // Adjust to your actual analog pin
-const int pinThrust1_DT = 4;
-const int pinThrust1_SCK = 5;
-
-// Load Cell Object
-HX711 loadCellThrust1;
 
 // RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
@@ -188,12 +190,13 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
 
-  loadCellThrust1.begin(pinThrust1_DT, pinThrust1_SCK);
-
   Serial.println("Dynamometer Hardware Initialized - RPM + VOLTAGE ONLY");
+
+  megaSerial.begin(38400); // Dedicated data link to the Mega
 }
 
 void loop() {
+  // Parse incoming commands from PC
   while (Serial.available() > 0) {
     char c = Serial.read();
     if (c == '\n') {
@@ -221,6 +224,27 @@ void loop() {
       inputBuffer = ""; 
     } else {
       inputBuffer += c; 
+    }
+  }
+
+  // Parse incoming load cell data asynchronously from Mega
+  while (megaSerial.available() > 0) {
+    char c = megaSerial.read();
+    if (c == '\n') {
+      megaBuffer.trim();
+      int idx1 = megaBuffer.indexOf(',');
+      int idx2 = megaBuffer.indexOf(',', idx1 + 1);
+      int idx3 = megaBuffer.indexOf(',', idx2 + 1);
+      
+      if (idx1 > 0 && idx2 > 0 && idx3 > 0) {
+        megaThrust1 = megaBuffer.substring(0, idx1).toFloat();
+        megaTorque1 = megaBuffer.substring(idx1 + 1, idx2).toFloat();
+        megaThrust2 = megaBuffer.substring(idx2 + 1, idx3).toFloat();
+        megaTorque2 = megaBuffer.substring(idx3 + 1).toFloat();
+      }
+      megaBuffer = "";
+    } else {
+      megaBuffer += c;
     }
   }
 
@@ -254,30 +278,26 @@ void loop() {
       currentRpm2 = 60000000.0 / p2;
     }
 
-    // Explicitly poll I2C voltage sensors
-    float valVolt1 = readINA226Voltage(0x44); // Updated from 0x40
-    float valVolt2 = readINA226Voltage(0x41); // Update this to 0x45 if your second sensor is similarly configured
-
-    // Explicitly poll analog current sensors
+    float valVolt1 = readINA226Voltage(0x44); 
+    float valVolt2 = readINA226Voltage(0x41); 
     float valCurr1 = readACS724Current(pinCurr1);
     float valCurr2 = readACS724Current(pinCurr2);
 
-    // Poll Front Thrust Load Cell (1 sample)
-    // NOTE: This library call disables global interrupts internally
-    float valThrust1 = 0.0;
-    if (loadCellThrust1.is_ready()) {
-      valThrust1 = loadCellThrust1.get_units(1); 
-    }
-
     // Format: Thrust1, Torque1, RPM1, Volt1, Curr1, Thrust2, Torque2, RPM2, Volt2, Curr2
-    Serial.print(valThrust1, 3); // Injected Thrust 1
-    Serial.print(",0.000,");
+    Serial.print(megaThrust1, 3); 
+    Serial.print(",");
+    Serial.print(megaTorque1, 3); 
+    Serial.print(",");
     Serial.print(currentRpm1, 0); 
     Serial.print(",");
     Serial.print(valVolt1, 2); 
     Serial.print(",");
     Serial.print(valCurr1, 2); 
-    Serial.print(",0.000,0.000,");
+    Serial.print(",");
+    Serial.print(megaThrust2, 3); 
+    Serial.print(",");
+    Serial.print(megaTorque2, 3); 
+    Serial.print(",");
     Serial.print(currentRpm2, 0); 
     Serial.print(",");
     Serial.print(valVolt2, 2);
