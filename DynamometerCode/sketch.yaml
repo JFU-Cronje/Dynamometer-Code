@@ -4,9 +4,10 @@ profiles:
     platforms:
       - platform: arduino:avr (1.8.8)
     programmer: ""
-    port: COM3
+    port: COM7
     port_config:
       baudrate: "115200"
+      lineEnding: "\r\n"
       bits: "8"
       parity: none
       stop_bits: one

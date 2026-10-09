@@ -190,7 +190,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
 
-  Serial.println("Dynamometer Hardware Initialized - RPM + VOLTAGE ONLY");
+  Serial.println("Dynamometer Hardware Initialized - MAIN UNO (RPM, V, A, + MEGA LINK)");
 
   megaSerial.begin(38400); // Dedicated data link to the Mega
 }

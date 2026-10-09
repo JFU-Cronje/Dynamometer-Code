@@ -92,7 +92,7 @@ namespace DynamometerGUI
             RefreshVisiblePlots();
             LoadLogFiles();
             
-            arduinoPort = new SerialPort("COM3", 115200);
+            arduinoPort = new SerialPort("COM7", 115200);
             arduinoPort.WriteTimeout = 50; // Prevent UI deadlock on USB crash
             
             try 
@@ -103,7 +103,7 @@ namespace DynamometerGUI
                  
                  LoadLatestCalibration(); 
             }
-            catch { MessageBox.Show("Could not open COM3. Verify the Arduino Uno is plugged in."); }
+            catch { MessageBox.Show("Could not open COM7. Verify the Arduino Uno is plugged in."); }
         }
 
         private void LoadLatestCalibration()

@@ -1,0 +1,55 @@
+{
+  "configurations": [
+    {
+      "name": "Arduino",
+      "includePath": [
+        "c:\\ArduinoWorkspace\\libraries/**",
+        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerSecondaryArduino/**",
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino/**",
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\variants\\mega/**",
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\HX711_Arduino_Library_0.7.5_b0f52684255e57b8\\HX711 Arduino Library\\src/**"
+      ],
+      "forcedInclude": [
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino\\Arduino.h"
+      ],
+      "compilerPath": "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr-gcc_7.3.0-atmel3.6.1-arduino7_fc423089e09cfcab/bin/avr-g++",
+      "compilerArgs": [
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr-gcc_7.3.0-atmel3.6.1-arduino7_fc423089e09cfcab/bin/avr-g++",
+        "-c",
+        "-g",
+        "-Os",
+        "-w",
+        "-std=gnu++11",
+        "-fpermissive",
+        "-fno-exceptions",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fno-threadsafe-statics",
+        "-Wno-error=narrowing",
+        "-MMD",
+        "-flto",
+        "-mmcu=atmega2560",
+        "-DF_CPU=16000000L",
+        "-DARDUINO=10607",
+        "-DARDUINO_AVR_MEGA2560",
+        "-DARDUINO_ARCH_AVR",
+        "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino",
+        "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\variants\\mega",
+        "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\HX711_Arduino_Library_0.7.5_b0f52684255e57b8\\HX711 Arduino Library\\src",
+        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerSecondaryArduino\\build\\build_Arduino-Mega\\sketch\\DynamometerSecondaryArduino.ino.cpp",
+        "-o",
+        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerSecondaryArduino\\build\\build_Arduino-Mega\\sketch\\DynamometerSecondaryArduino.ino.cpp.o"
+      ],
+      "defines": [
+        "F_CPU=16000000L",
+        "ARDUINO=10607",
+        "ARDUINO_AVR_MEGA2560",
+        "ARDUINO_ARCH_AVR",
+        "USBCON"
+      ],
+      "cStandard": "c17",
+      "cppStandard": "c++17"
+    }
+  ],
+  "version": 4
+}

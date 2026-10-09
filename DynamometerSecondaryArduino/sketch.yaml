@@ -1,0 +1,15 @@
+profiles:
+  Arduino-Mega:
+    fqbn: arduino:avr:mega:cpu=atmega2560
+    platforms:
+      - platform: arduino:avr (1.8.8)
+    libraries:
+      - HX711 Arduino Library (0.7.5)
+    port: COM6
+    port_config:
+      baudrate: "115200"
+      lineEnding: "\r\n"
+      bits: "8"
+      parity: none
+      stop_bits: one
+default_profile: Arduino-Mega
