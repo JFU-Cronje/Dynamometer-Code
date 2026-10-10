@@ -12,13 +12,14 @@ Servo escFront;
 Servo escBack;
 
 // Pin Mappings
-const int pinRpm1 = 2;        
+const int pinHandshake = 2; // Moved from 8 for Interrupt support
 const int pinRpm2 = 3; 
+const int pinRpm1 = 4;
 const int pinEsc1 = 10;
 const int pinEsc2 = 13;
 const int pinEscCal = A3;
 const int pinCurr1 = A1; 
-const int pinCurr2 = A2; 
+const int pinCurr2 = A2;
 
 // RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
@@ -26,6 +27,12 @@ volatile unsigned long pulsePeriod2 = 0;
 volatile unsigned long lastPulseTime1 = 0;
 volatile unsigned long lastPulseTime2 = 0;
 unsigned long lastSendTime = 0;
+
+volatile bool megaDataReady = false;
+
+void megaReadyISR() {
+  megaDataReady = true;
+}
 
 // Safety & Latching State
 String inputBuffer = "";
@@ -39,6 +46,9 @@ float scaleT2 = 1.0;
 float scaleQ2 = 1.0;
 
 bool lastMegaState = LOW;
+
+float filteredRpm1 = 0.0;
+float filteredRpm2 = 0.0;
 
 // Interrupt Service Routines
 void countRpm1() { 
@@ -167,12 +177,19 @@ void setup() {
 
   pinMode(pinRpm1, INPUT_PULLUP);
   pinMode(pinRpm2, INPUT_PULLUP);
-  pinMode(8, INPUT); // Handshake pin from Mega
+  pinMode(pinHandshake, INPUT); 
   
-  attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
+  attachInterrupt(digitalPinToInterrupt(pinHandshake), megaReadyISR, RISING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
+  // Pin 4 does not support hardware interrupts, so we use Pin Change Interrupts
+  PCICR |= B00000100;  // Enable PCIE2 (Port D)
+  PCMSK2 |= B00010000; // Enable PCINT20 (Pin 4)
 
   Serial.println("Dynamometer Hardware Initialized - MAIN UNO");
+}
+
+ISR(PCINT2_vect) {
+  if (digitalRead(pinRpm1) == LOW) countRpm1();
 }
 
 void loop() {
@@ -225,21 +242,19 @@ void loop() {
     escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
   }
 
-  // 100% Non-Blocking I2C Read (Rising Edge Trigger)
-  bool currentMegaState = digitalRead(8);
-  if (currentMegaState == HIGH && lastMegaState == LOW) {
+  // Read load cells immediately when the hardware interrupt sets the flag
+  if (megaDataReady) {
     if (Wire.requestFrom(8, 16) == 16) {
       for (int i = 0; i < 16; i++) {
         loadCellData.bytes[i] = Wire.read();
       }
-      // Apply UI Scale Factors
       loadCellData.val[0] *= scaleT1;
       loadCellData.val[1] *= scaleQ1;
       loadCellData.val[2] *= scaleT2;
       loadCellData.val[3] *= scaleQ2;
     }
+    megaDataReady = false;
   }
-  lastMegaState = currentMegaState;
 
   unsigned long now = millis();
   if (now - lastSendTime >= 100) {
@@ -254,10 +269,19 @@ void loop() {
 
     float currentRpm1 = 0;
     float currentRpm2 = 0;
+    float rawRpm1 = 0.0;
+    float rawRpm2 = 0.0;
     unsigned long currentMicros = micros();
 
     if ((currentMicros - t1 < 2000000) && p1 > 0) currentRpm1 = 60000000.0 / p1;
     if ((currentMicros - t2 < 2000000) && p2 > 0) currentRpm2 = 60000000.0 / p2;
+
+    // Filter RPM spikes
+    if (rawRpm1 > 0) filteredRpm1 = (filteredRpm1 * 0.7) + (rawRpm1 * 0.3);
+    else filteredRpm1 = 0;
+
+    if (rawRpm2 > 0) filteredRpm2 = (filteredRpm2 * 0.7) + (rawRpm2 * 0.3);
+    else filteredRpm2 = 0;
 
     float valVolt1 = readINA226Voltage(0x44); 
     float valVolt2 = readINA226Voltage(0x41); 

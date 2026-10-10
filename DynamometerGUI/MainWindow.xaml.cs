@@ -24,7 +24,6 @@ namespace DynamometerGUI
 
         SerialPort arduinoPort;
         DispatcherTimer testTimer;
-        DispatcherTimer renderTimer;
         DispatcherTimer stopHoldTimer;
         DateTime startTime;
         DateTime stopPressTime;
@@ -90,86 +89,37 @@ namespace DynamometerGUI
             stopHoldTimer.Interval = TimeSpan.FromMilliseconds(50);
             stopHoldTimer.Tick += StopHoldTimer_Tick;
 
-            // NEW: Add dedicated render timer for smooth 30fps graphing
-            renderTimer = new DispatcherTimer();
-            renderTimer.Interval = TimeSpan.FromMilliseconds(33); 
-            renderTimer.Tick += RenderTimer_Tick;
-            renderTimer.Start();
-
             InitializeGraphAxes();
             LoadLogFiles();
             
             AutoConnectArduino(); 
         }
-        private void RenderTimer_Tick(object? sender, EventArgs e)
-        {
-            // Center the current time in a 30-second window (-15s to +15s)
-            double minX = liveGraphTime - 15.0;
-            double maxX = liveGraphTime + 15.0;
-            if (minX < 0)
-            {
-                minX = 0;
-                maxX = 30.0;
-            }
 
-            if (TabSingle.IsSelected)
-            {
-                PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                
-                PlotFrontThrustSingle.Refresh();
-                PlotFrontTorqueSingle.Refresh();
-                PlotFrontRPMSingle.Refresh();
-            }
-            else if (TabCRP.IsSelected)
-            {
-                PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                
-                PlotFrontThrustCRP.Refresh();
-                PlotFrontTorqueCRP.Refresh();
-                PlotFrontRPMCRP.Refresh();
-                PlotBackThrustCRP.Refresh();
-                PlotBackTorqueCRP.Refresh();
-                PlotBackRPMCRP.Refresh();
-            }
-        }
-        private async void AutoConnectArduino()
+        private void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            // Run COM port scan asynchronously to prevent freezing the UI for 15 seconds
-            await Task.Run(() =>
+            ApplyTitleBarTheme(CmbTheme.SelectedIndex == 1);
+            testTimer.Start();
+        }
+
+        private void AutoConnectArduino()
+        {
+            foreach (string portName in SerialPort.GetPortNames().Reverse())
             {
-                foreach (string portName in SerialPort.GetPortNames().Reverse())
+                try
                 {
-                    try
-                    {
-                        var tempPort = new SerialPort(portName, 115200);
-                        tempPort.WriteTimeout = 50; 
-                        tempPort.ReadTimeout = 500;
-                        tempPort.DtrEnable = true;
-                        tempPort.Open();
-                        
-                        Dispatcher.Invoke(() =>
-                        {
-                            arduinoPort = tempPort;
-                            arduinoPort.DataReceived += ArduinoPort_DataReceived;
-                            LoadLatestCalibration(); 
-                        });
-                        return; 
-                    }
-                    catch { }
+                    arduinoPort = new SerialPort(portName, 115200);
+                    arduinoPort.WriteTimeout = 50; 
+                    arduinoPort.ReadTimeout = 500;
+                    arduinoPort.DtrEnable = true;
+                    arduinoPort.Open();
+                    
+                    arduinoPort.DataReceived += ArduinoPort_DataReceived;
+                    LoadLatestCalibration(); 
+                    return; 
                 }
-            });
-            
-            if (arduinoPort == null || !arduinoPort.IsOpen)
-            {
-                MessageBox.Show("Could not automatically find the Arduino. Please check your USB connection.");
+                catch { }
             }
+            MessageBox.Show("Could not automatically find the Arduino. Please check your USB connection.");
         }
 
         private void LoadLatestCalibration()
@@ -235,7 +185,7 @@ namespace DynamometerGUI
 
             foreach (var l in new[] { dlFrontThrustSingle, dlFrontTorqueSingle, dlFrontRPMSingle, dlFrontThrustCRP, dlFrontTorqueCRP, dlFrontRPMCRP, dlBackThrustCRP, dlBackTorqueCRP, dlBackRPMCRP })
             {
-                l.ManageAxisLimits = true; // Allow the logger to auto-expand
+                l.ManageAxisLimits = false; 
             }
 
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
@@ -260,18 +210,13 @@ namespace DynamometerGUI
             PlotBackRPMCRP.Plot.YLabel("RPM");
         }
 
-        private void Window_Loaded(object sender, RoutedEventArgs e)
-        {
-            ApplyTitleBarTheme(CmbTheme.SelectedIndex == 1);
-        }
-
         private void ArduinoPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
             try
             {
                 string line = arduinoPort.ReadLine().Trim();
 
-                if (line.StartsWith("CAL:")) return; // Skip calibration echoes
+                if (line.StartsWith("CAL:")) return;
 
                 string[] parts = line.Split(',');
 
@@ -297,23 +242,56 @@ namespace DynamometerGUI
                     mechPower2 = torque2 * rpm2 * (2.0 * Math.PI / 60.0);
                     motorEff2 = elecPower2 > 0 ? (mechPower2 / elecPower2) * 100.0 : 0;
 
-                    liveGraphTime += 0.1; 
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        liveGraphTime += 0.1; 
 
-                    double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
-                    double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
+                        double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
+                        double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
 
-                    // Add points to logger in memory instantly without waiting for UI
-                    dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
-                    dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
-                    dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
-                    
-                    dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
-                    dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
-                    dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
-                    
-                    dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
-                    dlBackTorqueCRP?.Add(liveGraphTime, torque2);
-                    dlBackRPMCRP?.Add(liveGraphTime, rpm2);
+                        dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
+                        dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
+                        dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
+                        
+                        dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
+                        dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
+                        dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
+                        
+                        dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
+                        dlBackTorqueCRP?.Add(liveGraphTime, torque2);
+                        dlBackRPMCRP?.Add(liveGraphTime, rpm2);
+
+                        // 30-second window centered on the live data point
+                        double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
+                        double maxX = liveGraphTime < 15.0 ? 30.0 : liveGraphTime + 15.0;
+
+                        if (TabSingle.IsSelected)
+                        {
+                            PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
+
+                            PlotFrontThrustSingle.Refresh();
+                            PlotFrontTorqueSingle.Refresh();
+                            PlotFrontRPMSingle.Refresh();
+                        }
+                        else if (TabCRP.IsSelected)
+                        {
+                            PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                            PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+
+                            PlotFrontThrustCRP.Refresh();
+                            PlotFrontTorqueCRP.Refresh();
+                            PlotFrontRPMCRP.Refresh();
+                            PlotBackThrustCRP.Refresh();
+                            PlotBackTorqueCRP.Refresh();
+                            PlotBackRPMCRP.Refresh();
+                        }
+                    }));
                 }
             }
             catch { }

@@ -22,6 +22,8 @@ union FloatConverter {
   byte bytes[16];
 } megaData;
 
+volatile char pendingCommand = 0;
+
 void setup() {
   pinMode(pinHandshake, OUTPUT);
   digitalWrite(pinHandshake, LOW);
@@ -33,25 +35,43 @@ void setup() {
 
   Wire.begin(8); 
   Wire.onRequest(requestEvent); 
-  Wire.onReceive(receiveEvent); // Listen for Tare commands from Uno
+  Wire.onReceive(receiveEvent);
 }
 
 void loop() {
-  if (loadCellThrust1.is_ready()) megaData.val[0] = loadCellThrust1.get_units(1);
-  if (loadCellTorque1.is_ready()) megaData.val[1] = loadCellTorque1.get_units(1);
-  if (loadCellThrust2.is_ready()) megaData.val[2] = loadCellThrust2.get_units(1);
-  if (loadCellTorque2.is_ready()) megaData.val[3] = loadCellTorque2.get_units(1);
-
-  // Signal Uno that it is safe to request I2C data
-  digitalWrite(pinHandshake, HIGH);
-  
-  unsigned long startWait = millis();
-  while(millis() - startWait < 15) { 
-    delay(1); 
+  // Execute Tare requests in the main loop to avoid hanging the I2C bus
+  if (pendingCommand != 0) {
+    char cmd = pendingCommand;
+    pendingCommand = 0;
+    if (cmd == 'A') loadCellThrust1.tare(1);
+    if (cmd == 'C') loadCellTorque1.tare(1);
+    if (cmd == 'E') loadCellThrust2.tare(1);
+    if (cmd == 'G') loadCellTorque2.tare(1);
   }
 
+  float t1 = megaData.val[0];
+  float q1 = megaData.val[1];
+  float t2 = megaData.val[2];
+  float q2 = megaData.val[3];
+
+  if (loadCellThrust1.is_ready()) t1 = loadCellThrust1.get_units(1);
+  if (loadCellTorque1.is_ready()) q1 = loadCellTorque1.get_units(1);
+  if (loadCellThrust2.is_ready()) t2 = loadCellThrust2.get_units(1);
+  if (loadCellTorque2.is_ready()) q2 = loadCellTorque2.get_units(1);
+
+  // Atomic update: disables interrupts for < 1 microsecond to prevent torn floats
+  noInterrupts();
+  megaData.val[0] = t1;
+  megaData.val[1] = q1;
+  megaData.val[2] = t2;
+  megaData.val[3] = q2;
+  interrupts();
+
+  // Pulse handshake pin to inform Uno that data is updated
+  digitalWrite(pinHandshake, HIGH);
+  delayMicroseconds(500);
   digitalWrite(pinHandshake, LOW);
-  delay(5);
+  delay(15);
 }
 
 void requestEvent() {
@@ -60,10 +80,6 @@ void requestEvent() {
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    char c = Wire.read();
-    if (c == 'A') loadCellThrust1.tare();
-    if (c == 'C') loadCellTorque1.tare();
-    if (c == 'E') loadCellThrust2.tare();
-    if (c == 'G') loadCellTorque2.tare();
+    pendingCommand = Wire.read();
   }
 }
