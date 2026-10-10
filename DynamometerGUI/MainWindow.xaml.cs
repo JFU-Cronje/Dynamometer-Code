@@ -92,18 +92,40 @@ namespace DynamometerGUI
             RefreshVisiblePlots();
             LoadLogFiles();
             
-            arduinoPort = new SerialPort("COM7", 115200);
-            arduinoPort.WriteTimeout = 50; // Prevent UI deadlock on USB crash
-            
-            try 
+            AutoConnectArduino(); // Replaced hardcoded COM port logic
+        }
+
+        private async void AutoConnectArduino()
+        {
+            // Run COM port scan asynchronously to prevent freezing the UI for 15 seconds
+            await Task.Run(() =>
             {
-                 arduinoPort.DtrEnable = true;
-                 arduinoPort.Open();
-                 arduinoPort.DataReceived += ArduinoPort_DataReceived;
-                 
-                 LoadLatestCalibration(); 
+                foreach (string portName in SerialPort.GetPortNames().Reverse())
+                {
+                    try
+                    {
+                        var tempPort = new SerialPort(portName, 115200);
+                        tempPort.WriteTimeout = 50; 
+                        tempPort.ReadTimeout = 500;
+                        tempPort.DtrEnable = true;
+                        tempPort.Open();
+                        
+                        Dispatcher.Invoke(() =>
+                        {
+                            arduinoPort = tempPort;
+                            arduinoPort.DataReceived += ArduinoPort_DataReceived;
+                            LoadLatestCalibration(); 
+                        });
+                        return; 
+                    }
+                    catch { }
+                }
+            });
+            
+            if (arduinoPort == null || !arduinoPort.IsOpen)
+            {
+                MessageBox.Show("Could not automatically find the Arduino. Please check your USB connection.");
             }
-            catch { MessageBox.Show("Could not open COM7. Verify the Arduino Uno is plugged in."); }
         }
 
         private void LoadLatestCalibration()

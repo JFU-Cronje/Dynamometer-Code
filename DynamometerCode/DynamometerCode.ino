@@ -1,9 +1,9 @@
 #include "Servo.h"
 #include <Wire.h>
 #include <SoftwareSerial.h>
-SoftwareSerial megaSerial(4, 5); // RX on Pin 4, TX on Pin 5 (TX unused but required by library)
 
-String megaBuffer = "";
+SoftwareSerial megaSerial(4, 5); // RX on Pin 4, TX on Pin 5
+
 float megaThrust1 = 0.000;
 float megaTorque1 = 0.000;
 float megaThrust2 = 0.000;
@@ -155,6 +155,11 @@ void runEscCalibration() {
   Serial.println("Calibration finished. Continuing to normal boot.");
 }
 
+union FloatConverter {
+  float val[4];
+  byte bytes[16];
+} loadCellData;
+
 void setup() {
   Serial.begin(115200);
   
@@ -190,9 +195,10 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
 
-  Serial.println("Dynamometer Hardware Initialized - MAIN UNO (RPM, V, A, + MEGA LINK)");
+  megaSerial.begin(38400); 
+  megaSerial.setTimeout(20); // Fast timeout to prevent Uno freezing if Mega disconnects
 
-  megaSerial.begin(38400); // Dedicated data link to the Mega
+  Serial.println("Dynamometer Hardware Initialized - MAIN UNO (RPM, V, A, + MEGA LINK)");
 }
 
 void loop() {
@@ -227,27 +233,6 @@ void loop() {
     }
   }
 
-  // Parse incoming load cell data asynchronously from Mega
-  while (megaSerial.available() > 0) {
-    char c = megaSerial.read();
-    if (c == '\n') {
-      megaBuffer.trim();
-      int idx1 = megaBuffer.indexOf(',');
-      int idx2 = megaBuffer.indexOf(',', idx1 + 1);
-      int idx3 = megaBuffer.indexOf(',', idx2 + 1);
-      
-      if (idx1 > 0 && idx2 > 0 && idx3 > 0) {
-        megaThrust1 = megaBuffer.substring(0, idx1).toFloat();
-        megaTorque1 = megaBuffer.substring(idx1 + 1, idx2).toFloat();
-        megaThrust2 = megaBuffer.substring(idx2 + 1, idx3).toFloat();
-        megaTorque2 = megaBuffer.substring(idx3 + 1).toFloat();
-      }
-      megaBuffer = "";
-    } else {
-      megaBuffer += c;
-    }
-  }
-
   if (!systemArmed) {
     escFront.writeMicroseconds(1100);
     escBack.writeMicroseconds(1100);
@@ -276,6 +261,21 @@ void loop() {
     }
     if ((currentMicros - t2 < 2000000) && p2 > 0) {
       currentRpm2 = 60000000.0 / p2;
+    }
+
+    // Ping the Mega and await the formatted load cell string
+    megaSerial.println("R"); 
+    String megaBuffer = megaSerial.readStringUntil('\n');
+    megaBuffer.trim();
+    int idx1 = megaBuffer.indexOf(',');
+    int idx2 = megaBuffer.indexOf(',', idx1 + 1);
+    int idx3 = megaBuffer.indexOf(',', idx2 + 1);
+    
+    if (idx1 > 0 && idx2 > 0 && idx3 > 0) {
+      megaThrust1 = megaBuffer.substring(0, idx1).toFloat();
+      megaTorque1 = megaBuffer.substring(idx1 + 1, idx2).toFloat();
+      megaThrust2 = megaBuffer.substring(idx2 + 1, idx3).toFloat();
+      megaTorque2 = megaBuffer.substring(idx3 + 1).toFloat();
     }
 
     float valVolt1 = readINA226Voltage(0x44); 
