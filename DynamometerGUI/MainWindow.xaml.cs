@@ -14,7 +14,6 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 
-
 namespace DynamometerGUI
 {
     public partial class MainWindow : Window
@@ -43,6 +42,8 @@ namespace DynamometerGUI
         double actualThrottle1 = 0;
         double targetThrottle2 = 0;
         double actualThrottle2 = 0;
+        int lastSentThrottle1 = -1;
+        int lastSentThrottle2 = -1;
         const double RAMP_RATE = 1.0; 
 
         // Automatic testing state
@@ -60,6 +61,19 @@ namespace DynamometerGUI
         ScottPlot.Plottables.DataLogger dlBackThrustCRP = null!, dlBackTorqueCRP = null!, dlBackRPMCRP = null!;
         double liveGraphTime = 0;
 
+        // Thread and Render throttling flags
+        private volatile bool isRenderPending = false;
+        private bool isArduinoReady = false;
+        int lastSentThrottle1 = -1;
+        int lastSentThrottle2 = -1;
+        private readonly object serialLock = new object();
+        private volatile bool isRenderPending = false;
+        private bool isArduinoReady = false;
+
+        // Known Calibration Constants (176g mass, 150mm arm)
+        const double TARGET_THRUST_N = 0.176 * 9.80665;        // 1.72597 N
+        const double TARGET_TORQUE_NM = TARGET_THRUST_N * 0.150; // 0.25890 Nm
+
         // Application Local Directories
         string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DynoLogs");
         string calSingleDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DynoCalibrationsSingle");
@@ -67,7 +81,11 @@ namespace DynamometerGUI
         
         // Calibration State
         bool isCalibrating = false;
-        double scaleT1 = 1, scaleQ1 = 1, scaleT2 = 1, scaleQ2 = 1;
+        double scaleT1 = 1.0, scaleQ1 = 1.0, scaleT2 = 1.0, scaleQ2 = 1.0;
+
+        // Known Calibration Constants (176g mass, 150mm arm)
+        const double TARGET_THRUST_N = 0.176 * 9.80665;              // 1.72597 N
+        const double TARGET_TORQUE_NM = TARGET_THRUST_N * 0.150;       // 0.25890 Nm
 
         public MainWindow()
         {
@@ -83,7 +101,6 @@ namespace DynamometerGUI
             testTimer = new DispatcherTimer();
             testTimer.Interval = TimeSpan.FromMilliseconds(50);
             testTimer.Tick += TestTimer_Tick;
-            testTimer.Start();
 
             stopHoldTimer = new DispatcherTimer();
             stopHoldTimer.Interval = TimeSpan.FromMilliseconds(50);
@@ -91,7 +108,7 @@ namespace DynamometerGUI
 
             InitializeGraphAxes();
             LoadLogFiles();
-            
+            LoadLatestCalibration();
             AutoConnectArduino(); 
         }
 
@@ -108,13 +125,13 @@ namespace DynamometerGUI
                 try
                 {
                     arduinoPort = new SerialPort(portName, 115200);
+                    arduinoPort.NewLine = "\n";
                     arduinoPort.WriteTimeout = 50; 
-                    arduinoPort.ReadTimeout = 500;
+                    arduinoPort.ReadTimeout = 300;
                     arduinoPort.DtrEnable = true;
                     arduinoPort.Open();
                     
                     arduinoPort.DataReceived += ArduinoPort_DataReceived;
-                    LoadLatestCalibration(); 
                     return; 
                 }
                 catch { }
@@ -124,29 +141,68 @@ namespace DynamometerGUI
 
         private void LoadLatestCalibration()
         {
-            string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
-            var latestFile = Directory.GetFiles(targetDir, "Calibration_*.csv").OrderByDescending(f => f).FirstOrDefault();
-
-            if (latestFile != null)
+            try
             {
-                string[] lines = File.ReadAllLines(latestFile);
-                if (lines.Length > 1)
-                {
-                    string[] parts = lines[1].Split(',');
-                    if (parts.Length >= 4)
-                    {
-                        scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
-                        scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
-                        scaleT2 = double.Parse(parts[2], CultureInfo.InvariantCulture);
-                        scaleQ2 = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
+                var latestFile = Directory.GetFiles(targetDir, "Calibration_*.csv")
+                                          .OrderByDescending(f => f)
+                                          .FirstOrDefault();
 
-                        SendCommand($"S_T1_{scaleT1.ToString("F4", CultureInfo.InvariantCulture)}");
-                        SendCommand($"S_Q1_{scaleQ1.ToString("F4", CultureInfo.InvariantCulture)}");
-                        SendCommand($"S_T2_{scaleT2.ToString("F4", CultureInfo.InvariantCulture)}");
-                        SendCommand($"S_Q2_{scaleQ2.ToString("F4", CultureInfo.InvariantCulture)}");
+                if (latestFile != null)
+                {
+                    string[] lines = File.ReadAllLines(latestFile);
+                    if (lines.Length > 1)
+                    {
+                        string[] parts = lines[1].Split(',');
+                        if (parts.Length >= 4)
+                        {
+                            scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
+                            scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                            scaleT2 = double.Parse(parts[2], CultureInfo.InvariantCulture);
+                            scaleQ2 = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                        }
                     }
                 }
+                else
+                {
+                    scaleT1 = 1.0; scaleQ1 = 1.0; scaleT2 = 1.0; scaleQ2 = 1.0;
+                }
+
+                if (isArduinoReady)
+                {
+                    SendCalibrationToArduino();
+                }
             }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("LoadLatestCalibration error: " + ex.Message);
+            }
+        }
+
+        private void SaveCalibration()
+        {
+            try
+            {
+                string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string calFile = Path.Combine(targetDir, $"Calibration_{timestamp}.csv");
+                
+                File.WriteAllText(calFile, "ScaleT1,ScaleQ1,ScaleT2,ScaleQ2\n");
+                File.AppendAllText(calFile, string.Format(CultureInfo.InvariantCulture, 
+                    "{0:G8},{1:G8},{2:G8},{3:G8}\n", scaleT1, scaleQ1, scaleT2, scaleQ2));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("SaveCalibration error: " + ex.Message);
+            }
+        }
+
+        private void SendCalibrationToArduino()
+        {
+            SendCommand($"S_T1_{scaleT1.ToString("G8", CultureInfo.InvariantCulture)}");
+            SendCommand($"S_Q1_{scaleQ1.ToString("G8", CultureInfo.InvariantCulture)}");
+            SendCommand($"S_T2_{scaleT2.ToString("G8", CultureInfo.InvariantCulture)}");
+            SendCommand($"S_Q2_{scaleQ2.ToString("G8", CultureInfo.InvariantCulture)}");
         }
 
         private void InitializeGraphAxes()
@@ -160,9 +216,9 @@ namespace DynamometerGUI
 
             foreach (var p in plots)
             {
-                var tickGen = new ScottPlot.TickGenerators.NumericAutomatic();
-                tickGen.TargetTickCount = 12;
-                p.Plot.Axes.Bottom.TickGenerator = tickGen;
+                // Vertical lines and major ticks at exact 5-second intervals
+                p.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericFixedInterval(5.0);
+                p.Plot.Axes.SetLimitsX(0, 30);
                 
                 var anno = p.Plot.Add.Annotation("Time (s)", ScottPlot.Alignment.LowerRight);
                 anno.LabelBorderColor = ScottPlot.Colors.Transparent;
@@ -188,26 +244,43 @@ namespace DynamometerGUI
                 l.ManageAxisLimits = false; 
             }
 
+            // Single Tab Graph Setup
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
             PlotFrontThrustSingle.Plot.YLabel("Thrust (kgf)");
+            PlotFrontThrustSingle.Plot.Axes.SetLimitsY(-2, 5);
+
             PlotFrontTorqueSingle.Plot.Title("Front Torque");
             PlotFrontTorqueSingle.Plot.YLabel("Torque (Nm)");
+            PlotFrontTorqueSingle.Plot.Axes.SetLimitsY(-0.2, 1.7);
+
             PlotFrontRPMSingle.Plot.Title("Front RPM");
             PlotFrontRPMSingle.Plot.YLabel("RPM");
+            PlotFrontRPMSingle.Plot.Axes.SetLimitsY(-1000, 10000);
 
+            // CRP Tab Graph Setup
             PlotFrontThrustCRP.Plot.Title("Front Thrust");
             PlotFrontThrustCRP.Plot.YLabel("Thrust (kgf)");
+            PlotFrontThrustCRP.Plot.Axes.SetLimitsY(-2, 5);
+
             PlotFrontTorqueCRP.Plot.Title("Front Torque");
             PlotFrontTorqueCRP.Plot.YLabel("Torque (Nm)");
+            PlotFrontTorqueCRP.Plot.Axes.SetLimitsY(-0.2, 1.7);
+
             PlotFrontRPMCRP.Plot.Title("Front RPM");
             PlotFrontRPMCRP.Plot.YLabel("RPM");
+            PlotFrontRPMCRP.Plot.Axes.SetLimitsY(-1000, 10000);
             
             PlotBackThrustCRP.Plot.Title("Back Thrust");
             PlotBackThrustCRP.Plot.YLabel("Thrust (kgf)");
+            PlotBackThrustCRP.Plot.Axes.SetLimitsY(-2, 5);
+
             PlotBackTorqueCRP.Plot.Title("Back Torque");
             PlotBackTorqueCRP.Plot.YLabel("Torque (Nm)");
+            PlotBackTorqueCRP.Plot.Axes.SetLimitsY(-0.2, 1.7);
+
             PlotBackRPMCRP.Plot.Title("Back RPM");
             PlotBackRPMCRP.Plot.YLabel("RPM");
+            PlotBackRPMCRP.Plot.Axes.SetLimitsY(-1000, 10000);
         }
 
         private void ArduinoPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
@@ -242,56 +315,69 @@ namespace DynamometerGUI
                     mechPower2 = torque2 * rpm2 * (2.0 * Math.PI / 60.0);
                     motorEff2 = elecPower2 > 0 ? (mechPower2 / elecPower2) * 100.0 : 0;
 
-                    Dispatcher.BeginInvoke(new Action(() =>
+                    // Send active calibration as soon as Uno confirms boot
+                    if (!isArduinoReady)
                     {
-                        liveGraphTime += 0.1; 
+                        isArduinoReady = true;
+                        SendCalibrationToArduino();
+                    }
 
-                        double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
-                        double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
-
-                        dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
-                        dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
-                        dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
-                        
-                        dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
-                        dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
-                        dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
-                        
-                        dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
-                        dlBackTorqueCRP?.Add(liveGraphTime, torque2);
-                        dlBackRPMCRP?.Add(liveGraphTime, rpm2);
-
-                        // 30-second window centered on the live data point
-                        double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
-                        double maxX = liveGraphTime < 15.0 ? 30.0 : liveGraphTime + 15.0;
-
-                        if (TabSingle.IsSelected)
+                    // Render-throttled UI update
+                    if (!isRenderPending)
+                    {
+                        isRenderPending = true;
+                        Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
                         {
-                            PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                            isRenderPending = false;
+                            liveGraphTime += 0.1; 
 
-                            PlotFrontThrustSingle.Refresh();
-                            PlotFrontTorqueSingle.Refresh();
-                            PlotFrontRPMSingle.Refresh();
-                        }
-                        else if (TabCRP.IsSelected)
-                        {
-                            PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                            PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                            double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
+                            double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
 
-                            PlotFrontThrustCRP.Refresh();
-                            PlotFrontTorqueCRP.Refresh();
-                            PlotFrontRPMCRP.Refresh();
-                            PlotBackThrustCRP.Refresh();
-                            PlotBackTorqueCRP.Refresh();
-                            PlotBackRPMCRP.Refresh();
-                        }
-                    }));
+                            dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
+                            dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
+                            dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
+                            
+                            dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
+                            dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
+                            dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
+                            
+                            dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
+                            dlBackTorqueCRP?.Add(liveGraphTime, torque2);
+                            dlBackRPMCRP?.Add(liveGraphTime, rpm2);
+
+                            // 30-second window centered on the live data point
+                            double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
+                            double maxX = liveGraphTime < 15.0 ? 30.0 : liveGraphTime + 15.0;
+
+                            if (TabSingle.IsSelected)
+                            {
+                                PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
+
+                                PlotFrontThrustSingle.Refresh();
+                                PlotFrontTorqueSingle.Refresh();
+                                PlotFrontRPMSingle.Refresh();
+                            }
+                            else if (TabCRP.IsSelected)
+                            {
+                                PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                                PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+
+                                PlotFrontThrustCRP.Refresh();
+                                PlotFrontTorqueCRP.Refresh();
+                                PlotFrontRPMCRP.Refresh();
+                                PlotBackThrustCRP.Refresh();
+                                PlotBackTorqueCRP.Refresh();
+                                PlotBackRPMCRP.Refresh();
+                            }
+                        }));
+                    }
                 }
             }
             catch { }
@@ -332,14 +418,12 @@ namespace DynamometerGUI
                     autoPhase++;
                     if (autoPhase == autoTotalSteps + 1)
                     {
-                        // Phase N+1: The 2-second cooldown buffer at the end of the test
                         targetThrottle1 = 0;
                         targetThrottle2 = 0;
                         autoTimer = 2.0; 
                     }
                     else if (autoPhase > autoTotalSteps + 1)
                     {
-                        // Phase N+2: Wait for actual throttle to ramp down to 0% before unlocking UI
                         if (actualThrottle1 <= 0.1 && actualThrottle2 <= 0.1)
                         {
                             StopAutoTest(); 
@@ -347,7 +431,6 @@ namespace DynamometerGUI
                     }
                     else
                     {
-                        // Active test phases (Phases 1 to N)
                         targetThrottle1 = autoTargetsFront[autoPhase - 1];
                         if (TabCRP.IsSelected) targetThrottle2 = autoTargetsBack[autoPhase - 1];
                         autoTimer = autoStepDuration; 
@@ -369,8 +452,21 @@ namespace DynamometerGUI
             TxtInputThrottle1.Text = $"ESC Throttle: {actualThrottle1:F0} %";
             TxtInputThrottle2.Text = $"ESC Throttle: {actualThrottle2:F0} %";
 
-            SendCommand($"T1_{actualThrottle1.ToString("F0", CultureInfo.InvariantCulture)}");
-            if (TabCRP.IsSelected) SendCommand($"T2_{actualThrottle2.ToString("F0", CultureInfo.InvariantCulture)}");
+            // Only transmit when value changes to prevent serial buffer congestion
+            int currentT1Int = (int)Math.Round(actualThrottle1);
+            int currentT2Int = (int)Math.Round(actualThrottle2);
+
+            if (currentT1Int != lastSentThrottle1)
+            {
+                SendCommand($"T1_{currentT1Int}");
+                lastSentThrottle1 = currentT1Int;
+            }
+
+            if (TabCRP.IsSelected && currentT2Int != lastSentThrottle2)
+            {
+                SendCommand($"T2_{currentT2Int}");
+                lastSentThrottle2 = currentT2Int;
+            }
 
             if (isRecording)
             {
@@ -408,7 +504,6 @@ namespace DynamometerGUI
                 }
             }
 
-            // Manage Auto Test button state (Disable if manual throttle is non-zero)
             if (!isAutoRunning)
             {
                 if (ChkActivateSingle.IsChecked == true)
@@ -446,7 +541,6 @@ namespace DynamometerGUI
             if (LblRecordingAutoSingle != null) LblRecordingAutoSingle.Visibility = Visibility.Hidden;
             if (LblRecordingAutoCRP != null) LblRecordingAutoCRP.Visibility = Visibility.Hidden;
             
-            // Re-enable manual sliders and record buttons if the system is still active
             if (ChkActivateSingle.IsChecked == true) 
             {
                 SldThrottleSingle.IsEnabled = true;
@@ -619,25 +713,82 @@ namespace DynamometerGUI
         {
             isCalibrating = false;
             SetCalibrationButtonsState(false);
-
-            string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string calFile = Path.Combine(targetDir, $"Calibration_{timestamp}.csv");
-            
-            File.WriteAllText(calFile, "ScaleT1,ScaleQ1,ScaleT2,ScaleQ2\n");
-            File.AppendAllText(calFile, string.Format(CultureInfo.InvariantCulture, "{0:F4},{1:F4},{2:F4},{3:F4}\n", scaleT1, scaleQ1, scaleT2, scaleQ2));
-            
-            MessageBox.Show("Calibration saved to:\n" + calFile, "Calibration Complete");
+            SaveCalibration();
+            MessageBox.Show("Calibration saved successfully.", "Calibration Complete");
         }
 
-        public void BtnTareThrust_Click(object sender, RoutedEventArgs e) { SendCommand("A"); }
-        public void BtnCalThrust_Click(object sender, RoutedEventArgs e) { SendCommand("B"); }
-        public void BtnTareTorque_Click(object sender, RoutedEventArgs e) { SendCommand("C"); }
-        public void BtnCalTorque_Click(object sender, RoutedEventArgs e) { SendCommand("D"); }
-        public void BtnTareThrustBack_Click(object sender, RoutedEventArgs e) { SendCommand("E"); }
-        public void BtnCalThrustBack_Click(object sender, RoutedEventArgs e) { SendCommand("F"); }
-        public void BtnTareTorqueBack_Click(object sender, RoutedEventArgs e) { SendCommand("G"); }
-        public void BtnCalTorqueBack_Click(object sender, RoutedEventArgs e) { SendCommand("H"); }
+        // --- Calibration and Tare Click Handlers ---
+        public void BtnTareThrust_Click(object sender, RoutedEventArgs e) 
+        { 
+            SendCommand("A"); 
+        }
+
+        public void BtnCalThrust_Click(object sender, RoutedEventArgs e) 
+        { 
+            if (Math.Abs(thrust1) < 1e-5)
+            {
+                MessageBox.Show("No load detected. Place the 176g weight on the motor mount before calibrating.", "Calibration Warning");
+                return;
+            }
+            scaleT1 = (TARGET_THRUST_N * scaleT1) / thrust1;
+            SendCommand($"S_T1_{scaleT1.ToString("G8", CultureInfo.InvariantCulture)}");
+            SaveCalibration();
+            MessageBox.Show($"Front Thrust calibrated to {TARGET_THRUST_N:F3} N ({0.176:F3} kgf).\nScale Factor: {scaleT1:G6}", "Calibration Saved");
+        }
+
+        public void BtnTareTorque_Click(object sender, RoutedEventArgs e) 
+        { 
+            SendCommand("C"); 
+        }
+
+        public void BtnCalTorque_Click(object sender, RoutedEventArgs e) 
+        { 
+            if (Math.Abs(torque1) < 1e-5)
+            {
+                MessageBox.Show("No load detected. Place the 176g weight on the torque arm before calibrating.", "Calibration Warning");
+                return;
+            }
+            scaleQ1 = (TARGET_TORQUE_NM * scaleQ1) / torque1;
+            SendCommand($"S_Q1_{scaleQ1.ToString("G8", CultureInfo.InvariantCulture)}");
+            SaveCalibration();
+            MessageBox.Show($"Front Torque calibrated to {TARGET_TORQUE_NM:F4} Nm.\nScale Factor: {scaleQ1:G6}", "Calibration Saved");
+        }
+
+        public void BtnTareThrustBack_Click(object sender, RoutedEventArgs e) 
+        { 
+            SendCommand("E"); 
+        }
+
+        public void BtnCalThrustBack_Click(object sender, RoutedEventArgs e) 
+        { 
+            if (Math.Abs(thrust2) < 1e-5)
+            {
+                MessageBox.Show("No load detected. Place the 176g weight on the back mount before calibrating.", "Calibration Warning");
+                return;
+            }
+            scaleT2 = (TARGET_THRUST_N * scaleT2) / thrust2;
+            SendCommand($"S_T2_{scaleT2.ToString("G8", CultureInfo.InvariantCulture)}");
+            SaveCalibration();
+            MessageBox.Show($"Back Thrust calibrated to {TARGET_THRUST_N:F3} N.\nScale Factor: {scaleT2:G6}", "Calibration Saved");
+        }
+
+        public void BtnTareTorqueBack_Click(object sender, RoutedEventArgs e) 
+        { 
+            SendCommand("G"); 
+        }
+
+        public void BtnCalTorqueBack_Click(object sender, RoutedEventArgs e) 
+        { 
+            if (Math.Abs(torque2) < 1e-5)
+            {
+                MessageBox.Show("No load detected. Place the 176g weight on the back torque arm before calibrating.", "Calibration Warning");
+                return;
+            }
+            scaleQ2 = (TARGET_TORQUE_NM * scaleQ2) / torque2;
+            SendCommand($"S_Q2_{scaleQ2.ToString("G8", CultureInfo.InvariantCulture)}");
+            SaveCalibration();
+            MessageBox.Show($"Back Torque calibrated to {TARGET_TORQUE_NM:F4} Nm.\nScale Factor: {scaleQ2:G6}", "Calibration Saved");
+        }
 
         private void ChkActivateSingle_Checked(object sender, RoutedEventArgs e)
         {
@@ -805,7 +956,6 @@ namespace DynamometerGUI
 
         private void RefreshVisiblePlots()
         {
-            // Massive performance gain: Only forces WPF to redraw the graphs that are actually on screen
             if (TabSingle.IsSelected)
             {
                 PlotFrontThrustSingle.Refresh();
@@ -834,7 +984,6 @@ namespace DynamometerGUI
             }
             catch
             {
-                // General catch to prevent unhandled TimeoutExceptions from crashing the app
                 if (arduinoPort != null && arduinoPort.IsOpen)
                 {
                     try { arduinoPort.Close(); } catch { }
@@ -904,12 +1053,12 @@ namespace DynamometerGUI
                 if (double.TryParse(txt.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double duration))
                 {
                     if (duration > 99.0) duration = 99.0;
-                    if (duration < 0.1) duration = 0.1; // Prevent negative or zero time intervals
+                    if (duration < 0.1) duration = 0.1;
                     txt.Text = duration.ToString("F1", CultureInfo.InvariantCulture);
                 }
                 else
                 {
-                    txt.Text = "2.0"; // Fallback if the user enters letters or invalid text
+                    txt.Text = "2.0";
                 }
             }
         }
@@ -927,18 +1076,17 @@ namespace DynamometerGUI
             
             try
             {
-                TxtStepDuration_LostFocus(TxtStepDurationSingle, null!); // Force clamp/format if clicked directly
+                TxtStepDuration_LostFocus(TxtStepDurationSingle, null!);
                 autoStepDuration = double.Parse(TxtStepDurationSingle.Text, CultureInfo.InvariantCulture);
                 
                 for (int i = 0; i < autoTotalSteps; i++) autoTargetsFront[i] = double.Parse(boxes[i].Text, CultureInfo.InvariantCulture);
                 
                 autoPhase = 0;
-                autoTimer = 2.0; // 2 seconds of 0 throttle hold
+                autoTimer = 2.0;
                 targetThrottle1 = 0;
                 targetThrottle2 = 0;
                 isAutoRunning = true;
 
-                // Update UI state
                 BtnStartAutoSingle.Content = "Stop Auto Test";
                 SldThrottleSingle.IsEnabled = false;
 
@@ -961,7 +1109,7 @@ namespace DynamometerGUI
 
             try
             {
-                TxtStepDuration_LostFocus(TxtStepDurationCRP, null!); // Force clamp/format if clicked directly
+                TxtStepDuration_LostFocus(TxtStepDurationCRP, null!);
                 autoStepDuration = double.Parse(TxtStepDurationCRP.Text, CultureInfo.InvariantCulture);
                 
                 for (int i = 0; i < autoTotalSteps; i++)
@@ -976,7 +1124,6 @@ namespace DynamometerGUI
                 targetThrottle2 = 0;
                 isAutoRunning = true;
 
-                // Update UI state
                 BtnStartAutoCRP.Content = "Stop Auto Test";
                 SldThrottleFrontCRP.IsEnabled = false;
                 SldThrottleBackCRP.IsEnabled = false;

@@ -293,7 +293,7 @@ void loop() {
     Serial.print(",");
     Serial.print(loadCellData.val[1], 3); 
     Serial.print(",");
-    Serial.print(currentRpm1, 0); 
+    Serial.print(filteredRpm1, 0); 
     Serial.print(",");
     Serial.print(valVolt1, 2); 
     Serial.print(",");
@@ -303,10 +303,10 @@ void loop() {
     Serial.print(",");
     Serial.print(loadCellData.val[3], 3); 
     Serial.print(",");
-    Serial.print(currentRpm2, 0); 
+    Serial.print(filteredRpm2, 0); 
     Serial.print(",");
     Serial.print(valVolt2, 2);
     Serial.print(",");
-    Serial.println(valCurr2, 2);                
+    Serial.println(valCurr2, 2);            
   }
 }
