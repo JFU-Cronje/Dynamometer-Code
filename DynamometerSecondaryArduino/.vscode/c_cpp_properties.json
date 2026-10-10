@@ -7,7 +7,8 @@
         "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerSecondaryArduino/**",
         "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino/**",
         "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\variants\\mega/**",
-        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\HX711_Arduino_Library_0.7.5_b0f52684255e57b8\\HX711 Arduino Library\\src/**"
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\HX711_Arduino_Library_0.7.5_b0f52684255e57b8\\HX711 Arduino Library\\src/**",
+        "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\libraries\\Wire\\src/**"
       ],
       "forcedInclude": [
         "C:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino\\Arduino.h"
@@ -36,6 +37,7 @@
         "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino",
         "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\variants\\mega",
         "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\HX711_Arduino_Library_0.7.5_b0f52684255e57b8\\HX711 Arduino Library\\src",
+        "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\libraries\\Wire\\src",
         "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerSecondaryArduino\\build\\build_Arduino-Mega\\sketch\\DynamometerSecondaryArduino.ino.cpp",
         "-o",
         "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerSecondaryArduino\\build\\build_Arduino-Mega\\sketch\\DynamometerSecondaryArduino.ino.cpp.o"

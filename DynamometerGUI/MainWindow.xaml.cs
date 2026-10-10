@@ -14,6 +14,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 
+
 namespace DynamometerGUI
 {
     public partial class MainWindow : Window
@@ -23,6 +24,7 @@ namespace DynamometerGUI
 
         SerialPort arduinoPort;
         DispatcherTimer testTimer;
+        DispatcherTimer renderTimer;
         DispatcherTimer stopHoldTimer;
         DateTime startTime;
         DateTime stopPressTime;
@@ -88,13 +90,55 @@ namespace DynamometerGUI
             stopHoldTimer.Interval = TimeSpan.FromMilliseconds(50);
             stopHoldTimer.Tick += StopHoldTimer_Tick;
 
+            // NEW: Add dedicated render timer for smooth 30fps graphing
+            renderTimer = new DispatcherTimer();
+            renderTimer.Interval = TimeSpan.FromMilliseconds(33); 
+            renderTimer.Tick += RenderTimer_Tick;
+            renderTimer.Start();
+
             InitializeGraphAxes();
-            RefreshVisiblePlots();
             LoadLogFiles();
             
-            AutoConnectArduino(); // Replaced hardcoded COM port logic
+            AutoConnectArduino(); 
         }
+        private void RenderTimer_Tick(object? sender, EventArgs e)
+        {
+            // Center the current time in a 30-second window (-15s to +15s)
+            double minX = liveGraphTime - 15.0;
+            double maxX = liveGraphTime + 15.0;
+            if (minX < 0)
+            {
+                minX = 0;
+                maxX = 30.0;
+            }
 
+            if (TabSingle.IsSelected)
+            {
+                PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                
+                PlotFrontThrustSingle.Refresh();
+                PlotFrontTorqueSingle.Refresh();
+                PlotFrontRPMSingle.Refresh();
+            }
+            else if (TabCRP.IsSelected)
+            {
+                PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                
+                PlotFrontThrustCRP.Refresh();
+                PlotFrontTorqueCRP.Refresh();
+                PlotFrontRPMCRP.Refresh();
+                PlotBackThrustCRP.Refresh();
+                PlotBackTorqueCRP.Refresh();
+                PlotBackRPMCRP.Refresh();
+            }
+        }
         private async void AutoConnectArduino()
         {
             // Run COM port scan asynchronously to prevent freezing the UI for 15 seconds
@@ -166,7 +210,6 @@ namespace DynamometerGUI
 
             foreach (var p in plots)
             {
-                p.Plot.Axes.SetLimitsX(0, 60);
                 var tickGen = new ScottPlot.TickGenerators.NumericAutomatic();
                 tickGen.TargetTickCount = 12;
                 p.Plot.Axes.Bottom.TickGenerator = tickGen;
@@ -192,44 +235,29 @@ namespace DynamometerGUI
 
             foreach (var l in new[] { dlFrontThrustSingle, dlFrontTorqueSingle, dlFrontRPMSingle, dlFrontThrustCRP, dlFrontTorqueCRP, dlFrontRPMCRP, dlBackThrustCRP, dlBackTorqueCRP, dlBackRPMCRP })
             {
-                l.ManageAxisLimits = false; 
+                l.ManageAxisLimits = true; // Allow the logger to auto-expand
             }
 
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
             PlotFrontThrustSingle.Plot.YLabel("Thrust (kgf)");
-            PlotFrontThrustSingle.Plot.Axes.SetLimitsY(-1, 5); 
-
             PlotFrontTorqueSingle.Plot.Title("Front Torque");
             PlotFrontTorqueSingle.Plot.YLabel("Torque (Nm)");
-            PlotFrontTorqueSingle.Plot.Axes.SetLimitsY(-0.1, 1);
-
             PlotFrontRPMSingle.Plot.Title("Front RPM");
             PlotFrontRPMSingle.Plot.YLabel("RPM");
-            PlotFrontRPMSingle.Plot.Axes.SetLimitsY(-500, 10000);
 
             PlotFrontThrustCRP.Plot.Title("Front Thrust");
             PlotFrontThrustCRP.Plot.YLabel("Thrust (kgf)");
-            PlotFrontThrustCRP.Plot.Axes.SetLimitsY(-1, 5);
-
             PlotFrontTorqueCRP.Plot.Title("Front Torque");
             PlotFrontTorqueCRP.Plot.YLabel("Torque (Nm)");
-            PlotFrontTorqueCRP.Plot.Axes.SetLimitsY(-0.1, 1);
-
             PlotFrontRPMCRP.Plot.Title("Front RPM");
             PlotFrontRPMCRP.Plot.YLabel("RPM");
-            PlotFrontRPMCRP.Plot.Axes.SetLimitsY(-500, 10000);
             
             PlotBackThrustCRP.Plot.Title("Back Thrust");
             PlotBackThrustCRP.Plot.YLabel("Thrust (kgf)");
-            PlotBackThrustCRP.Plot.Axes.SetLimitsY(-1, 5);
-
             PlotBackTorqueCRP.Plot.Title("Back Torque");
             PlotBackTorqueCRP.Plot.YLabel("Torque (Nm)");
-            PlotBackTorqueCRP.Plot.Axes.SetLimitsY(-0.1, 1);
-
             PlotBackRPMCRP.Plot.Title("Back RPM");
             PlotBackRPMCRP.Plot.YLabel("RPM");
-            PlotBackRPMCRP.Plot.Axes.SetLimitsY(-500, 10000);
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -243,19 +271,7 @@ namespace DynamometerGUI
             {
                 string line = arduinoPort.ReadLine().Trim();
 
-                if (line.StartsWith("CAL:"))
-                {
-                    string[] calParts = line.Split(':');
-                    if (calParts.Length == 3)
-                    {
-                        double parsedScale = double.Parse(calParts[2], CultureInfo.InvariantCulture);
-                        if (calParts[1] == "T1") scaleT1 = parsedScale;
-                        else if (calParts[1] == "Q1") scaleQ1 = parsedScale;
-                        else if (calParts[1] == "T2") scaleT2 = parsedScale;
-                        else if (calParts[1] == "Q2") scaleQ2 = parsedScale;
-                    }
-                    return;
-                }
+                if (line.StartsWith("CAL:")) return; // Skip calibration echoes
 
                 string[] parts = line.Split(',');
 
@@ -281,85 +297,23 @@ namespace DynamometerGUI
                     mechPower2 = torque2 * rpm2 * (2.0 * Math.PI / 60.0);
                     motorEff2 = elecPower2 > 0 ? (mechPower2 / elecPower2) * 100.0 : 0;
 
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        liveGraphTime += 0.1; 
+                    liveGraphTime += 0.1; 
 
-                        double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
-                        double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
+                    double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
+                    double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
 
-                        dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
-                        dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
-                        dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
-                        
-                        dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
-                        dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
-                        dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
-                        
-                        dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
-                        dlBackTorqueCRP?.Add(liveGraphTime, torque2);
-                        dlBackRPMCRP?.Add(liveGraphTime, rpm2);
-
-                        double minX = liveGraphTime < 30 ? 0 : liveGraphTime - 30;
-                        double maxX = liveGraphTime < 30 ? 60 : liveGraphTime + 30;
-
-                        if (TabSingle.IsSelected)
-                        {
-                            var activePlots = new[] { PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle };
-                            var activeVals = new[] { displayThrust1, torque1, rpm1 };
-
-                            for (int i = 0; i < activePlots.Length; i++)
-                            {
-                                var p = activePlots[i];
-                                p.Plot.Axes.SetLimitsX(minX, maxX);
-                                
-                                if (i != 2) 
-                                {
-                                    var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
-                                    if (activeVals[i] >= yRange.Max || activeVals[i] <= yRange.Min)
-                                    {
-                                        p.Plot.Axes.AutoScaleY();
-                                    }
-                                }
-                            }
-                        }
-                        else if (TabCRP.IsSelected)
-                        {
-                            var activePlots = new[] { PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP, PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP };
-                            var activeVals = new[] { displayThrust1, torque1, rpm1, displayThrust2, torque2, rpm2 };
-
-                            for (int i = 0; i < activePlots.Length; i++)
-                            {
-                                var p = activePlots[i];
-                                p.Plot.Axes.SetLimitsX(minX, maxX);
-                                
-                                if (i != 2 && i != 5) 
-                                {
-                                    var yRange = p.Plot.Axes.GetLimits().Rect.YRange;
-                                    if (activeVals[i] >= yRange.Max || activeVals[i] <= yRange.Min)
-                                    {
-                                        p.Plot.Axes.AutoScaleY();
-                                    }
-                                }
-                            }
-                        }
-
-                        TxtFrontVoltage.Text = $"Voltage: {volt1:F2} V";
-                        TxtFrontCurrent.Text = $"Current: {curr1:F2} A";
-                        TxtFrontRPM.Text = $"RPM: {rpm1:F0}";
-                        TxtFrontElecPower.Text = $"Elec Power: {elecPower1:F2} W";
-                        TxtFrontMechPower.Text = $"Mech Power: {mechPower1:F2} W";
-                        TxtFrontMotorEff.Text = $"Motor Eff: {motorEff1:F2} %";
-
-                        TxtBackVoltage.Text = $"Voltage: {volt2:F2} V";
-                        TxtBackCurrent.Text = $"Current: {curr2:F2} A";
-                        TxtBackRPM.Text = $"RPM: {rpm2:F0}";
-                        TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
-                        TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
-                        TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
-
-                        RefreshVisiblePlots(); 
-                    }));
+                    // Add points to logger in memory instantly without waiting for UI
+                    dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
+                    dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
+                    dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
+                    
+                    dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
+                    dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
+                    dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
+                    
+                    dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
+                    dlBackTorqueCRP?.Add(liveGraphTime, torque2);
+                    dlBackRPMCRP?.Add(liveGraphTime, rpm2);
                 }
             }
             catch { }
@@ -378,6 +332,20 @@ namespace DynamometerGUI
 
         private void TestTimer_Tick(object? sender, EventArgs e)
         {
+            TxtFrontVoltage.Text = $"Voltage: {volt1:F2} V";
+            TxtFrontCurrent.Text = $"Current: {curr1:F2} A";
+            TxtFrontRPM.Text = $"RPM: {rpm1:F0}";
+            TxtFrontElecPower.Text = $"Elec Power: {elecPower1:F2} W";
+            TxtFrontMechPower.Text = $"Mech Power: {mechPower1:F2} W";
+            TxtFrontMotorEff.Text = $"Motor Eff: {motorEff1:F2} %";
+
+            TxtBackVoltage.Text = $"Voltage: {volt2:F2} V";
+            TxtBackCurrent.Text = $"Current: {curr2:F2} A";
+            TxtBackRPM.Text = $"RPM: {rpm2:F0}";
+            TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
+            TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
+            TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
+            
             if (isAutoRunning)
             {
                 autoTimer -= 0.05;
@@ -886,9 +854,9 @@ namespace DynamometerGUI
                     arduinoPort.Write(command + "\n");
                 }
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
+            catch
             {
-                // Force close the deadlocked port to free the UI thread if the USB crashes
+                // General catch to prevent unhandled TimeoutExceptions from crashing the app
                 if (arduinoPort != null && arduinoPort.IsOpen)
                 {
                     try { arduinoPort.Close(); } catch { }

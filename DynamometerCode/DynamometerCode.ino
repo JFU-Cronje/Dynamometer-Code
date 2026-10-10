@@ -1,13 +1,11 @@
 #include "Servo.h"
 #include <Wire.h>
-#include <SoftwareSerial.h>
 
-SoftwareSerial megaSerial(4, 5); // RX on Pin 4, TX on Pin 5
-
-float megaThrust1 = 0.000;
-float megaTorque1 = 0.000;
-float megaThrust2 = 0.000;
-float megaTorque2 = 0.000;
+// Initialize to 0.0 to prevent NaN outputs before the first read
+union FloatConverter {
+  float val[4] = {0.0, 0.0, 0.0, 0.0};
+  byte bytes[16];
+} loadCellData;
 
 // ESCs
 Servo escFront;
@@ -19,8 +17,8 @@ const int pinRpm2 = 3;
 const int pinEsc1 = 10;
 const int pinEsc2 = 13;
 const int pinEscCal = A3;
-const int pinCurr1 = A1; // Adjust to your actual analog pin
-const int pinCurr2 = A2; // Adjust to your actual analog pin
+const int pinCurr1 = A1; 
+const int pinCurr2 = A2; 
 
 // RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
@@ -35,7 +33,14 @@ bool systemArmed = false;
 float currentOutputT1 = 0;
 float currentOutputT2 = 0;
 
-// Interrupt Service Routines for KE0068 (Active LOW on White)
+float scaleT1 = 1.0;
+float scaleQ1 = 1.0;
+float scaleT2 = 1.0;
+float scaleQ2 = 1.0;
+
+bool lastMegaState = LOW;
+
+// Interrupt Service Routines
 void countRpm1() { 
   unsigned long now = micros();
   unsigned long interval = now - lastPulseTime1;
@@ -59,61 +64,41 @@ void countRpm2() {
 // ==========================================================
 void initINA226(uint8_t address) {
   Wire.beginTransmission(address);
-  Wire.write(0x00); // Configuration Register
-  Wire.write(0x47); // MSB: 0x4727 configures 64x hardware averaging
-  Wire.write(0x27); // LSB: 1.1ms conversion time, continuous mode
+  Wire.write(0x00); 
+  Wire.write(0x47); 
+  Wire.write(0x27); 
   Wire.endTransmission();
 }
 
 float readINA226Voltage(uint8_t address) {
   Wire.beginTransmission(address);
-  Wire.write(0x02); // Bus Voltage Register
-  
-  if (Wire.endTransmission() != 0) {
-    return -1.0; 
-  }
+  Wire.write(0x02); 
+  if (Wire.endTransmission() != 0) return -1.0; 
   
   delay(1);
-  
   Wire.requestFrom(address, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint16_t val = (Wire.read() << 8) | Wire.read();
-    float rawVoltage = val * 0.00125; // 1.25mV per LSB
-    
-    // Apply proportional scale factor instead of static offset
-    // Multiplier = Actual (13.97) / Raw (14.69) = ~0.95098
+    float rawVoltage = val * 0.00125; 
     float calibratedVoltage = rawVoltage * 0.95098; 
-    
     if (calibratedVoltage < 0.0) return 0.0;
-    
     return calibratedVoltage;
   }
-  
   return -2.0; 
 }
 
 // ==========================================================
-// Analog Current Read (ACS724-20AU Unidirectional)
+// Analog Current Read
 // ==========================================================
 float readACS724Current(int pin) {
-  // Take an average of 10 samples to smooth out motor noise
   long sum = 0;
   for (int i = 0; i < 10; i++) {
     sum += analogRead(pin);
+    delayMicroseconds(500); // Allow ADC to settle and sample true noise profile
   }
-  float avgRaw = sum / 10.0;
-  
-  // Convert 10-bit ADC value (0-1023) to Voltage (0-5V)
-  float voltage = avgRaw * (5.0 / 1023.0);
-  
-  // For ACS724-20AU (Unidirectional): Offset = 0.5V, Sensitivity = 0.200 V/A
+  float voltage = (sum / 10.0) * (5.0 / 1023.0);
   float current = (voltage - 0.5) / 0.200;
-  
-  // Filter out floating noise around 0 Amps
-  if (current < 0.15 && current > -0.15) {
-    return 0.0;
-  }
-  
+  if (current < 0.15 && current > -0.15) return 0.0;
   return current;
 }
 
@@ -126,7 +111,7 @@ bool calibrationRequested() {
   uint32_t t0 = millis();
   while (millis() - t0 < 3000) {
     if (digitalRead(pinEscCal) == LOW) {
-      delay(50); // debounce
+      delay(50); 
       if (digitalRead(pinEscCal) == LOW) return true;
     }
   }
@@ -142,10 +127,7 @@ void runEscCalibration() {
   
   uint32_t t0 = millis();
   while (digitalRead(pinEscCal) == LOW) {
-    if (millis() - t0 > 20000) {
-      Serial.println("Timeout - proceeding to MIN.");
-      break; 
-    }
+    if (millis() - t0 > 20000) break; 
   }
 
   escFront.writeMicroseconds(1100);
@@ -155,18 +137,12 @@ void runEscCalibration() {
   Serial.println("Calibration finished. Continuing to normal boot.");
 }
 
-union FloatConverter {
-  float val[4];
-  byte bytes[16];
-} loadCellData;
-
 void setup() {
   Serial.begin(115200);
   
   Wire.begin(); 
   Wire.setWireTimeout(25000, true); 
 
-  // Run a definitive I2C scan at boot to confirm the physical address
   Serial.println("--- I2C SCAN START ---");
   for (byte i = 8; i < 120; i++) {
     Wire.beginTransmission(i);
@@ -177,9 +153,8 @@ void setup() {
   }
   Serial.println("--- I2C SCAN END ---");
 
-  // Explicitly initialize the known addresses
-  initINA226(0x44); // Updated from 0x40
-  initINA226(0x41); // Update this to 0x45 if your second sensor is similarly configured
+  initINA226(0x44); 
+  initINA226(0x41); 
 
   escFront.attach(pinEsc1, 1100, 1900);
   escBack.attach(pinEsc2, 1100, 1900);
@@ -192,13 +167,12 @@ void setup() {
 
   pinMode(pinRpm1, INPUT_PULLUP);
   pinMode(pinRpm2, INPUT_PULLUP);
+  pinMode(8, INPUT); // Handshake pin from Mega
+  
   attachInterrupt(digitalPinToInterrupt(pinRpm1), countRpm1, FALLING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
 
-  megaSerial.begin(38400); 
-  megaSerial.setTimeout(20); // Fast timeout to prevent Uno freezing if Mega disconnects
-
-  Serial.println("Dynamometer Hardware Initialized - MAIN UNO (RPM, V, A, + MEGA LINK)");
+  Serial.println("Dynamometer Hardware Initialized - MAIN UNO");
 }
 
 void loop() {
@@ -219,14 +193,24 @@ void loop() {
         if (throttlePct > 100.0) throttlePct = 100.0;
         currentOutputT2 = throttlePct;
       } 
-      else if (inputBuffer == "UNLOCK_SINGLE" || inputBuffer == "UNLOCK_CRP") {
-        systemArmed = true;
-      } else if (inputBuffer == "LOCK_SINGLE" || inputBuffer == "LOCK_CRP" || inputBuffer == "STOP_ALL") {
+      else if (inputBuffer.startsWith("S_T1_")) scaleT1 = inputBuffer.substring(5).toFloat();
+      else if (inputBuffer.startsWith("S_Q1_")) scaleQ1 = inputBuffer.substring(5).toFloat();
+      else if (inputBuffer.startsWith("S_T2_")) scaleT2 = inputBuffer.substring(5).toFloat();
+      else if (inputBuffer.startsWith("S_Q2_")) scaleQ2 = inputBuffer.substring(5).toFloat();
+      
+      // Forward Tare commands to the Mega over I2C
+      else if (inputBuffer == "A" || inputBuffer == "C" || inputBuffer == "E" || inputBuffer == "G") {
+        Wire.beginTransmission(8);
+        Wire.write(inputBuffer.charAt(0));
+        Wire.endTransmission();
+      }
+
+      else if (inputBuffer == "UNLOCK_SINGLE" || inputBuffer == "UNLOCK_CRP") systemArmed = true;
+      else if (inputBuffer == "LOCK_SINGLE" || inputBuffer == "LOCK_CRP" || inputBuffer == "STOP_ALL") {
         systemArmed = false;
         currentOutputT1 = 0.0;
         currentOutputT2 = 0.0;
       }
-      
       inputBuffer = ""; 
     } else {
       inputBuffer += c; 
@@ -240,6 +224,22 @@ void loop() {
     escFront.writeMicroseconds(1100 + (currentOutputT1 * 8.0));
     escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
   }
+
+  // 100% Non-Blocking I2C Read (Rising Edge Trigger)
+  bool currentMegaState = digitalRead(8);
+  if (currentMegaState == HIGH && lastMegaState == LOW) {
+    if (Wire.requestFrom(8, 16) == 16) {
+      for (int i = 0; i < 16; i++) {
+        loadCellData.bytes[i] = Wire.read();
+      }
+      // Apply UI Scale Factors
+      loadCellData.val[0] *= scaleT1;
+      loadCellData.val[1] *= scaleQ1;
+      loadCellData.val[2] *= scaleT2;
+      loadCellData.val[3] *= scaleQ2;
+    }
+  }
+  lastMegaState = currentMegaState;
 
   unsigned long now = millis();
   if (now - lastSendTime >= 100) {
@@ -256,27 +256,8 @@ void loop() {
     float currentRpm2 = 0;
     unsigned long currentMicros = micros();
 
-    if ((currentMicros - t1 < 2000000) && p1 > 0) {
-      currentRpm1 = 60000000.0 / p1;
-    }
-    if ((currentMicros - t2 < 2000000) && p2 > 0) {
-      currentRpm2 = 60000000.0 / p2;
-    }
-
-    // Ping the Mega and await the formatted load cell string
-    megaSerial.println("R"); 
-    String megaBuffer = megaSerial.readStringUntil('\n');
-    megaBuffer.trim();
-    int idx1 = megaBuffer.indexOf(',');
-    int idx2 = megaBuffer.indexOf(',', idx1 + 1);
-    int idx3 = megaBuffer.indexOf(',', idx2 + 1);
-    
-    if (idx1 > 0 && idx2 > 0 && idx3 > 0) {
-      megaThrust1 = megaBuffer.substring(0, idx1).toFloat();
-      megaTorque1 = megaBuffer.substring(idx1 + 1, idx2).toFloat();
-      megaThrust2 = megaBuffer.substring(idx2 + 1, idx3).toFloat();
-      megaTorque2 = megaBuffer.substring(idx3 + 1).toFloat();
-    }
+    if ((currentMicros - t1 < 2000000) && p1 > 0) currentRpm1 = 60000000.0 / p1;
+    if ((currentMicros - t2 < 2000000) && p2 > 0) currentRpm2 = 60000000.0 / p2;
 
     float valVolt1 = readINA226Voltage(0x44); 
     float valVolt2 = readINA226Voltage(0x41); 
@@ -284,9 +265,9 @@ void loop() {
     float valCurr2 = readACS724Current(pinCurr2);
 
     // Format: Thrust1, Torque1, RPM1, Volt1, Curr1, Thrust2, Torque2, RPM2, Volt2, Curr2
-    Serial.print(megaThrust1, 3); 
+    Serial.print(loadCellData.val[0], 3); 
     Serial.print(",");
-    Serial.print(megaTorque1, 3); 
+    Serial.print(loadCellData.val[1], 3); 
     Serial.print(",");
     Serial.print(currentRpm1, 0); 
     Serial.print(",");
@@ -294,9 +275,9 @@ void loop() {
     Serial.print(",");
     Serial.print(valCurr1, 2); 
     Serial.print(",");
-    Serial.print(megaThrust2, 3); 
+    Serial.print(loadCellData.val[2], 3); 
     Serial.print(",");
-    Serial.print(megaTorque2, 3); 
+    Serial.print(loadCellData.val[3], 3); 
     Serial.print(",");
     Serial.print(currentRpm2, 0); 
     Serial.print(",");
