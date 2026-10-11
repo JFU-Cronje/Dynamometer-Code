@@ -21,9 +21,8 @@ const int pinEscCal = A3;
 const int pinCurr1 = A1; 
 const int pinCurr2 = A2;
 
-// Auto-detected I2C addresses for INA226 voltage sensors
-uint8_t addrVolt1 = 0x40;
-uint8_t addrVolt2 = 0x41;
+const uint8_t addrVolt1 = 0x44; // Front Voltage Sensor (A1 -> VCC, A0 -> GND)
+const uint8_t addrVolt2 = 0x45; // Back Voltage Sensor  (A1 -> VCC, A0 -> VCC)
 
 // RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
@@ -152,14 +151,6 @@ void runEscCalibration() {
   Serial.println("Calibration finished. Continuing to normal boot.");
 }
 
-uint8_t probeAddress(uint8_t a, uint8_t b) {
-  Wire.beginTransmission(a);
-  if (Wire.endTransmission() == 0) return a;
-  Wire.beginTransmission(b);
-  if (Wire.endTransmission() == 0) return b;
-  return a; 
-}
-
 void runI2CScan() {
   Serial.println("--- I2C SCAN START ---");
   byte count = 0;
@@ -183,10 +174,6 @@ void setup() {
   Wire.begin(); 
   Wire.setWireTimeout(25000, true); 
   runI2CScan();
-
-  // Auto-detect whether modules are 0x40/0x44 or 0x41/0x45
-  addrVolt1 = probeAddress(0x40, 0x44);
-  addrVolt2 = probeAddress(0x41, 0x45);
 
   initINA226(addrVolt1); 
   initINA226(addrVolt2); 

@@ -777,10 +777,14 @@ namespace DynamometerGUI
 
         private void LoadLogFiles()
         {
-            if (ListLogFiles == null) return;
+            if (ListLogFiles == null || !Directory.Exists(logDir)) return;
             ListLogFiles.Items.Clear();
-            var files = Directory.GetFiles(logDir, "DynamometerData_*.csv").OrderByDescending(f => f).ToList();
-            foreach (var f in files) ListLogFiles.Items.Add(Path.GetFileName(f));
+            var files = new DirectoryInfo(logDir)
+                            .GetFiles("DynamometerData_*.csv")
+                            .OrderByDescending(f => f.LastWriteTime)
+                            .Select(f => f.Name)
+                            .ToList();
+            foreach (var file in files) ListLogFiles.Items.Add(file);
         }
 
         private void ListLogFiles_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1030,7 +1034,7 @@ namespace DynamometerGUI
                 {
                     string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
                     string mode = isAutoRunning ? "Auto" : "Manual";
-                    csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{mode}_{timestamp}.csv"));
+                    csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{timestamp}_{mode}.csv"));
                     csvWriter.AutoFlush = true;
                     csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2");
 
