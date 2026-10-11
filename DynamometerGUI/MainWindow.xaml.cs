@@ -22,8 +22,8 @@ namespace DynamometerGUI
     {
         public double Thrust1, Torque1, RPM1, Volt1, Curr1;
         public double Thrust2, Torque2, RPM2, Volt2, Curr2;
-        public double ElecPower1, MechPower1, MotorEff1;
-        public double ElecPower2, MechPower2, MotorEff2;
+        public double ElecPower1, MechPower1, MotorEff1, PropEff1;
+        public double ElecPower2, MechPower2, MotorEff2, PropEff2;
     }
 
     public partial class MainWindow : Window
@@ -50,8 +50,8 @@ namespace DynamometerGUI
         // Data variables
         double thrust1, torque1, rpm1, volt1, curr1;
         double thrust2, torque2, rpm2, volt2, curr2;
-        double elecPower1, mechPower1, motorEff1;
-        double elecPower2, mechPower2, motorEff2;
+        double elecPower1, mechPower1, motorEff1, propEff1;
+        double elecPower2, mechPower2, motorEff2, propEff2;
 
         // Throttle variables
         double targetThrottle1 = 0;
@@ -205,18 +205,20 @@ namespace DynamometerGUI
                         double ep1 = v1 * c1;
                         double mp1 = q1 * r1 * (2.0 * Math.PI / 60.0);
                         double me1 = ep1 > 0 ? (mp1 / ep1) * 100.0 : 0;
+                        double pe1 = mp1 > 0 ? (t1 / mp1) : 0;
 
                         double ep2 = v2 * c2;
                         double mp2 = q2 * r2 * (2.0 * Math.PI / 60.0);
                         double me2 = ep2 > 0 ? (mp2 / ep2) * 100.0 : 0;
+                        double pe2 = mp2 > 0 ? (t2 / mp2) : 0;
 
                         // 1. Enqueue telemetry first so charts update uninterrupted
                         telemetryQueue.Enqueue(new TelemetryPacket
                         {
                             Thrust1 = t1, Torque1 = q1, RPM1 = r1, Volt1 = v1, Curr1 = c1,
                             Thrust2 = t2, Torque2 = q2, RPM2 = r2, Volt2 = v2, Curr2 = c2,
-                            ElecPower1 = ep1, MechPower1 = mp1, MotorEff1 = me1,
-                            ElecPower2 = ep2, MechPower2 = mp2, MotorEff2 = me2
+                            ElecPower1 = ep1, MechPower1 = mp1, MotorEff1 = me1, PropEff1 = pe1,
+                            ElecPower2 = ep2, MechPower2 = mp2, MotorEff2 = me2, PropEff2 = pe2
                         });
 
                         // 2. Thread-safe disk logging
@@ -236,12 +238,12 @@ namespace DynamometerGUI
                                         bool isCrp = isCRPSelected;
 
                                         string csvLine = string.Format(CultureInfo.InvariantCulture,
-                                            "{0},{1:F3},{2:F3},{3:F0},{4:F2},{5:F2},{6},{7:F2},{8:F2},{9:F2}," +
-                                            "{10:F3},{11:F3},{12:F0},{13:F2},{14:F2},{15},{16:F2},{17:F2},{18:F2}",
+                                            "{0},{1:F3},{2:F3},{3:F0},{4:F2},{5:F2},{6},{7:F2},{8:F2},{9:F2},{10:F3}," +
+                                            "{11:F3},{12:F3},{13:F0},{14:F2},{15:F2},{16},{17:F2},{18:F2},{19:F2},{20:F3}",
                                             elapsedLogTime,
-                                            t1, q1, r1, v1, c1, actT1, ep1, mp1, me1,
+                                            t1, q1, r1, v1, c1, actT1, ep1, mp1, me1, pe1,
                                             isCrp ? t2 : 0, isCrp ? q2 : 0, isCrp ? r2 : 0, isCrp ? v2 : 0, isCrp ? c2 : 0,
-                                            actT2, isCrp ? ep2 : 0, isCrp ? mp2 : 0, isCrp ? me2 : 0);
+                                            actT2, isCrp ? ep2 : 0, isCrp ? mp2 : 0, isCrp ? me2 : 0, isCrp ? pe2 : 0);
 
                                         csvWriter.WriteLine(csvLine);
                                         nextLogInterval += 0.1;
@@ -294,8 +296,8 @@ namespace DynamometerGUI
             {
                 thrust1 = packet.Thrust1; torque1 = packet.Torque1; rpm1 = packet.RPM1; volt1 = packet.Volt1; curr1 = packet.Curr1;
                 thrust2 = packet.Thrust2; torque2 = packet.Torque2; rpm2 = packet.RPM2; volt2 = packet.Volt2; curr2 = packet.Curr2;
-                elecPower1 = packet.ElecPower1; mechPower1 = packet.MechPower1; motorEff1 = packet.MotorEff1;
-                elecPower2 = packet.ElecPower2; mechPower2 = packet.MechPower2; motorEff2 = packet.MotorEff2;
+                elecPower1 = packet.ElecPower1; mechPower1 = packet.MechPower1; motorEff1 = packet.MotorEff1; propEff1 = packet.PropEff1;
+                elecPower2 = packet.ElecPower2; mechPower2 = packet.MechPower2; motorEff2 = packet.MotorEff2; propEff2 = packet.PropEff2;
 
                 liveGraphTime += 0.1;
                 hasNewData = true;
@@ -370,6 +372,7 @@ namespace DynamometerGUI
                 TxtFrontElecPower.Text = $"Elec Power: {elecPower1:F2} W";
                 TxtFrontMechPower.Text = $"Mech Power: {mechPower1:F2} W";
                 TxtFrontMotorEff.Text = $"Motor Eff: {motorEff1:F2} %";
+                TxtFrontPropEff.Text = $"Prop Eff: {propEff1:F3} N/W";
 
                 TxtBackVoltage.Text = $"Voltage: {volt2:F2} V";
                 TxtBackCurrent.Text = $"Current: {curr2:F2} A";
@@ -377,6 +380,7 @@ namespace DynamometerGUI
                 TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
                 TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
                 TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
+                TxtBackPropEff.Text = $"Prop Eff: {propEff2:F3} N/W";
             }
 
             // 6. Emergency Stop Button Countdown
@@ -619,8 +623,7 @@ namespace DynamometerGUI
             var plots = new[] 
             { 
                 PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle, 
-                PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP, 
-                PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP 
+                PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP 
             };
 
             foreach (var p in plots)
@@ -1036,7 +1039,7 @@ namespace DynamometerGUI
                     string mode = isAutoRunning ? "Auto" : "Manual";
                     csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{timestamp}_{mode}.csv"));
                     csvWriter.AutoFlush = true;
-                    csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2");
+                    csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,PropEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2,PropEff2");
 
                     startTime = DateTime.Now;
                     nextLogInterval = 0.1;

@@ -238,6 +238,7 @@
                         <TextBlock Name="TxtFrontElecPower" Text="Elec Power: 0.00 W" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtFrontMechPower" Text="Mech Power: 0.00 W" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtFrontMotorEff" Text="Motor Eff: 0.00 %" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtFrontPropEff" Text="Prop Eff: 0.000 N/W" Margin="0,0,0,2"/>
                     </StackPanel>
                     
                     <StackPanel Grid.Column="1" Name="PanelBackDataDerived" Visibility="Collapsed">
@@ -245,6 +246,7 @@
                         <TextBlock Name="TxtBackElecPower" Text="Elec Power: 0.00 W" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtBackMechPower" Text="Mech Power: 0.00 W" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtBackMotorEff" Text="Motor Eff: 0.00 %" Margin="0,0,0,2"/>
+                        <TextBlock Name="TxtBackPropEff" Text="Prop Eff: 0.000 N/W" Margin="0,0,0,2"/>
                     </StackPanel>
                 </Grid>
             </StackPanel>
@@ -359,7 +361,7 @@
             <TabItem Name="TabCRP" Header="Contra Rotating Propellers">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="300"/> 
+                        <ColumnDefinition Width="340"/> 
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
@@ -479,7 +481,7 @@
             <TabItem Name="TabLogs" Header="Test Logs">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="280"/>
+                        <ColumnDefinition Width="325"/> 
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
