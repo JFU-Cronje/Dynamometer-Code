@@ -5,3 +5,5 @@ obj/
 
 # Arduino ignores
 build/
+
+PublishBuild/

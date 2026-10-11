@@ -265,6 +265,13 @@
             </StackPanel>
         </Grid>
 
+        <!-- Hardware Initializing Banner -->
+        <Border Name="BorderStartupNotice" DockPanel.Dock="Top" Background="#FFF3CD" BorderBrush="#FFEEBA" BorderThickness="1" CornerRadius="4" Margin="5,2,5,4" Padding="10,6" Visibility="Visible">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <TextBlock Name="TxtStartupCountdown" Text="Hardware Initializing... Please wait (10s)" FontWeight="Bold" FontSize="14" Foreground="#856404" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
         <TabControl Name="MainTabControl" Background="Transparent" SelectionChanged="MainTabControl_SelectionChanged" Margin="0" Padding="0" BorderThickness="0,1,0,0" BorderBrush="Gray">
             <TabItem Name="TabSingle" Header="Single Propeller">
                 <Grid Margin="0,10,0,0">

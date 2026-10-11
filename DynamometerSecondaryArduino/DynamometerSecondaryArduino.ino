@@ -33,20 +33,32 @@ void setup() {
   loadCellThrust2.begin(pinThrust2_DT, pinThrust2_SCK);
   loadCellTorque2.begin(pinTorque2_DT, pinTorque2_SCK);
 
+  // Auto-zero all load cells on boot to eliminate massive uncalibrated offsets
+  unsigned long t0 = millis();
+  while (millis() - t0 < 1000) {
+    if (loadCellThrust1.is_ready() && loadCellTorque1.is_ready() &&
+        loadCellThrust2.is_ready() && loadCellTorque2.is_ready()) {
+      break;
+    }
+  }
+  loadCellThrust1.tare(10);
+  loadCellTorque1.tare(10);
+  loadCellThrust2.tare(10);
+  loadCellTorque2.tare(10);
+
   Wire.begin(8); 
   Wire.onRequest(requestEvent); 
   Wire.onReceive(receiveEvent);
 }
 
 void loop() {
-  // Execute Tare requests in the main loop to avoid hanging the I2C bus
   if (pendingCommand != 0) {
     char cmd = pendingCommand;
     pendingCommand = 0;
-    if (cmd == 'A') loadCellThrust1.tare(1);
-    if (cmd == 'C') loadCellTorque1.tare(1);
-    if (cmd == 'E') loadCellThrust2.tare(1);
-    if (cmd == 'G') loadCellTorque2.tare(1);
+    if (cmd == 'A') loadCellThrust1.tare(5);
+    if (cmd == 'C') loadCellTorque1.tare(5);
+    if (cmd == 'E') loadCellThrust2.tare(5);
+    if (cmd == 'G') loadCellTorque2.tare(5);
   }
 
   float t1 = megaData.val[0];
@@ -59,7 +71,6 @@ void loop() {
   if (loadCellThrust2.is_ready()) t2 = loadCellThrust2.get_units(1);
   if (loadCellTorque2.is_ready()) q2 = loadCellTorque2.get_units(1);
 
-  // Atomic update: disables interrupts for < 1 microsecond to prevent torn floats
   noInterrupts();
   megaData.val[0] = t1;
   megaData.val[1] = q1;
@@ -67,7 +78,6 @@ void loop() {
   megaData.val[3] = q2;
   interrupts();
 
-  // Pulse handshake pin to inform Uno that data is updated
   digitalWrite(pinHandshake, HIGH);
   delayMicroseconds(500);
   digitalWrite(pinHandshake, LOW);

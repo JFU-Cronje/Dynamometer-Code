@@ -23,7 +23,10 @@ namespace DynamometerGUI
 
         SerialPort arduinoPort;
         DispatcherTimer testTimer;
+        DispatcherTimer renderTimer;
         DispatcherTimer stopHoldTimer;
+        DispatcherTimer startupTimer;
+
         DateTime startTime;
         DateTime stopPressTime;
         double nextLogInterval;
@@ -61,10 +64,10 @@ namespace DynamometerGUI
         ScottPlot.Plottables.DataLogger dlBackThrustCRP = null!, dlBackTorqueCRP = null!, dlBackRPMCRP = null!;
         double liveGraphTime = 0;
 
-        // Thread and Render throttling flags
-        private readonly object serialLock = new object();
-        private volatile bool isRenderPending = false;
-        private bool isArduinoReady = false;
+        // Thread and Startup State Flags
+        private readonly object writeLock = new object();
+        private bool isSetupComplete = false;
+        private int startupSecondsRemaining = 10;
 
         // Known Calibration Constants (176g mass, 150mm arm)
         const double TARGET_THRUST_N = 0.176 * 9.80665;        // 1.72597 N
@@ -98,6 +101,20 @@ namespace DynamometerGUI
             stopHoldTimer.Interval = TimeSpan.FromMilliseconds(50);
             stopHoldTimer.Tick += StopHoldTimer_Tick;
 
+            renderTimer = new DispatcherTimer();
+            renderTimer.Interval = TimeSpan.FromMilliseconds(50); // 20 fps rendering
+            renderTimer.Tick += RenderTimer_Tick;
+
+            startupTimer = new DispatcherTimer();
+            startupTimer.Interval = TimeSpan.FromSeconds(1);
+            startupTimer.Tick += StartupTimer_Tick;
+
+            // Lock controls during startup
+            ChkActivateSingle.IsEnabled = false;
+            ChkActivateCRP.IsEnabled = false;
+            BtnStartCalSingle.IsEnabled = false;
+            BtnStartCalCRP.IsEnabled = false;
+
             InitializeGraphAxes();
             LoadLogFiles();
             LoadLatestCalibration();
@@ -108,6 +125,34 @@ namespace DynamometerGUI
         {
             ApplyTitleBarTheme(CmbTheme.SelectedIndex == 1);
             testTimer.Start();
+            renderTimer.Start();
+            startupTimer.Start();
+        }
+
+        private void StartupTimer_Tick(object? sender, EventArgs e)
+        {
+            startupSecondsRemaining--;
+            if (startupSecondsRemaining > 0)
+            {
+                TxtStartupCountdown.Text = $"Hardware Initializing... Please wait ({startupSecondsRemaining}s)";
+            }
+            else
+            {
+                startupTimer.Stop();
+                isSetupComplete = true;
+                BorderStartupNotice.Visibility = Visibility.Collapsed;
+
+                // Send latest calibration now that Uno has completed bootloader & setup
+                SendCalibrationToArduino();
+
+                // Unlock primary controls
+                ChkActivateSingle.IsEnabled = true;
+                ChkActivateCRP.IsEnabled = true;
+                BtnStartCalSingle.IsEnabled = true;
+                BtnStartCalCRP.IsEnabled = true;
+
+                ResetGraphAxesY();
+            }
         }
 
         private void AutoConnectArduino()
@@ -160,7 +205,7 @@ namespace DynamometerGUI
                     scaleT1 = 1.0; scaleQ1 = 1.0; scaleT2 = 1.0; scaleQ2 = 1.0;
                 }
 
-                if (isArduinoReady)
+                if (isSetupComplete)
                 {
                     SendCalibrationToArduino();
                 }
@@ -286,14 +331,11 @@ namespace DynamometerGUI
         {
             try
             {
-                string line;
-                lock (serialLock)
-                {
-                    if (arduinoPort == null || !arduinoPort.IsOpen) return;
-                    line = arduinoPort.ReadLine().Trim();
-                }
+                // Non-blocking read without serialLock
+                if (arduinoPort == null || !arduinoPort.IsOpen) return;
+                string line = arduinoPort.ReadLine().Trim();
 
-                if (line.StartsWith("CAL:")) return;
+                if (!isSetupComplete || line.StartsWith("CAL:")) return;
 
                 string[] parts = line.Split(',');
 
@@ -319,69 +361,65 @@ namespace DynamometerGUI
                     mechPower2 = torque2 * rpm2 * (2.0 * Math.PI / 60.0);
                     motorEff2 = elecPower2 > 0 ? (mechPower2 / elecPower2) * 100.0 : 0;
 
-                    if (!isArduinoReady)
+                    // Marshal data addition to UI thread (takes < 100 nanoseconds, never drops points)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
                     {
-                        isArduinoReady = true;
-                        SendCalibrationToArduino();
-                    }
+                        liveGraphTime += 0.1; 
 
-                    if (!isRenderPending)
-                    {
-                        isRenderPending = true;
-                        Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
-                        {
-                            isRenderPending = false;
-                            liveGraphTime += 0.1; 
+                        double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
+                        double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
 
-                            double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
-                            double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
-
-                            dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
-                            dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
-                            dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
-                            
-                            dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
-                            dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
-                            dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
-                            
-                            dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
-                            dlBackTorqueCRP?.Add(liveGraphTime, torque2);
-                            dlBackRPMCRP?.Add(liveGraphTime, rpm2);
-
-                            double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
-                            double maxX = liveGraphTime < 15.0 ? 30.0 : liveGraphTime + 15.0;
-
-                            if (TabSingle.IsSelected)
-                            {
-                                PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
-
-                                PlotFrontThrustSingle.Refresh();
-                                PlotFrontTorqueSingle.Refresh();
-                                PlotFrontRPMSingle.Refresh();
-                            }
-                            else if (TabCRP.IsSelected)
-                            {
-                                PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
-                                PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
-
-                                PlotFrontThrustCRP.Refresh();
-                                PlotFrontTorqueCRP.Refresh();
-                                PlotFrontRPMCRP.Refresh();
-                                PlotBackThrustCRP.Refresh();
-                                PlotBackTorqueCRP.Refresh();
-                                PlotBackRPMCRP.Refresh();
-                            }
-                        }));
-                    }
+                        dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
+                        dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
+                        dlFrontRPMSingle?.Add(liveGraphTime, rpm1);
+                        
+                        dlFrontThrustCRP?.Add(liveGraphTime, displayThrust1);
+                        dlFrontTorqueCRP?.Add(liveGraphTime, torque1);
+                        dlFrontRPMCRP?.Add(liveGraphTime, rpm1);
+                        
+                        dlBackThrustCRP?.Add(liveGraphTime, displayThrust2);
+                        dlBackTorqueCRP?.Add(liveGraphTime, torque2);
+                        dlBackRPMCRP?.Add(liveGraphTime, rpm2);
+                    }));
                 }
             }
             catch { }
+        }
+
+        private void RenderTimer_Tick(object? sender, EventArgs e)
+        {
+            if (!isSetupComplete) return;
+
+            // 30-second window centered on the live data point
+            double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
+            double maxX = liveGraphTime < 15.0 ? 30.0 : liveGraphTime + 15.0;
+
+            if (TabSingle.IsSelected)
+            {
+                PlotFrontThrustSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontTorqueSingle.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontRPMSingle.Plot.Axes.SetLimitsX(minX, maxX);
+
+                PlotFrontThrustSingle.Refresh();
+                PlotFrontTorqueSingle.Refresh();
+                PlotFrontRPMSingle.Refresh();
+            }
+            else if (TabCRP.IsSelected)
+            {
+                PlotFrontThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotFrontRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotBackThrustCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotBackTorqueCRP.Plot.Axes.SetLimitsX(minX, maxX);
+                PlotBackRPMCRP.Plot.Axes.SetLimitsX(minX, maxX);
+
+                PlotFrontThrustCRP.Refresh();
+                PlotFrontTorqueCRP.Refresh();
+                PlotFrontRPMCRP.Refresh();
+                PlotBackThrustCRP.Refresh();
+                PlotBackTorqueCRP.Refresh();
+                PlotBackRPMCRP.Refresh();
+            }
         }
 
         private void ApplyTitleBarTheme(bool isDark)
@@ -395,22 +433,32 @@ namespace DynamometerGUI
             catch { }
         }
 
+        int textUpdateCounter = 0;
+
         private void TestTimer_Tick(object? sender, EventArgs e)
         {
-            TxtFrontVoltage.Text = $"Voltage: {volt1:F2} V";
-            TxtFrontCurrent.Text = $"Current: {curr1:F2} A";
-            TxtFrontRPM.Text = $"RPM: {rpm1:F0}";
-            TxtFrontElecPower.Text = $"Elec Power: {elecPower1:F2} W";
-            TxtFrontMechPower.Text = $"Mech Power: {mechPower1:F2} W";
-            TxtFrontMotorEff.Text = $"Motor Eff: {motorEff1:F2} %";
+            if (isSetupComplete)
+            {
+                textUpdateCounter++;
+                if (textUpdateCounter >= 4) // Update UI text at 5 Hz to eliminate layout engine stalls
+                {
+                    textUpdateCounter = 0;
+                    TxtFrontVoltage.Text = $"Voltage: {volt1:F2} V";
+                    TxtFrontCurrent.Text = $"Current: {curr1:F2} A";
+                    TxtFrontRPM.Text = $"RPM: {rpm1:F0}";
+                    TxtFrontElecPower.Text = $"Elec Power: {elecPower1:F2} W";
+                    TxtFrontMechPower.Text = $"Mech Power: {mechPower1:F2} W";
+                    TxtFrontMotorEff.Text = $"Motor Eff: {motorEff1:F2} %";
 
-            TxtBackVoltage.Text = $"Voltage: {volt2:F2} V";
-            TxtBackCurrent.Text = $"Current: {curr2:F2} A";
-            TxtBackRPM.Text = $"RPM: {rpm2:F0}";
-            TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
-            TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
-            TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
-            
+                    TxtBackVoltage.Text = $"Voltage: {volt2:F2} V";
+                    TxtBackCurrent.Text = $"Current: {curr2:F2} A";
+                    TxtBackRPM.Text = $"RPM: {rpm2:F0}";
+                    TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
+                    TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
+                    TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
+                }
+            }
+
             if (isAutoRunning)
             {
                 autoTimer -= 0.05;
@@ -504,7 +552,7 @@ namespace DynamometerGUI
                 }
             }
 
-            if (!isAutoRunning)
+            if (!isAutoRunning && isSetupComplete)
             {
                 if (ChkActivateSingle.IsChecked == true)
                 {
@@ -631,7 +679,7 @@ namespace DynamometerGUI
                     PanelBackDataInputs.Visibility = isCRP ? Visibility.Visible : Visibility.Collapsed;
                     PanelBackDataDerived.Visibility = isCRP ? Visibility.Visible : Visibility.Collapsed;
 
-                    if (!isCalibrating && !isRecording) LoadLatestCalibration();
+                    if (!isCalibrating && !isRecording && isSetupComplete) LoadLatestCalibration();
                 }
             }
         }
@@ -693,10 +741,16 @@ namespace DynamometerGUI
             BtnTareTorqueBack.IsEnabled = enabled;
             BtnCalTorqueBack.IsEnabled = enabled;
 
-            BtnStartCalSingle.IsEnabled = !enabled;
+            bool isSystemActive = (ChkActivateSingle.IsChecked == true || ChkActivateCRP.IsChecked == true);
+
+            BtnStartCalSingle.IsEnabled = !enabled && !isSystemActive && isSetupComplete;
             BtnFinishCalSingle.IsEnabled = enabled;
-            BtnStartCalCRP.IsEnabled = !enabled;
+            BtnStartCalCRP.IsEnabled = !enabled && !isSystemActive && isSetupComplete;
             BtnFinishCalCRP.IsEnabled = enabled;
+
+            // Interlock: Prevent system activation while calibration is in progress
+            ChkActivateSingle.IsEnabled = !enabled && isSetupComplete;
+            ChkActivateCRP.IsEnabled = !enabled && isSetupComplete;
 
             TabSingle.IsEnabled = !enabled || TabSingle.IsSelected;
             TabCRP.IsEnabled = !enabled || TabCRP.IsSelected;
@@ -797,6 +851,11 @@ namespace DynamometerGUI
             BtnStartAutoSingle.IsEnabled = true;
             TabCRP.IsEnabled = false; 
             TabLogs.IsEnabled = false;
+
+            // Interlock: Disable calibration buttons while system is active
+            BtnStartCalSingle.IsEnabled = false;
+            BtnStartCalCRP.IsEnabled = false;
+
             SendCommand("UNLOCK_SINGLE");
         }
 
@@ -808,6 +867,14 @@ namespace DynamometerGUI
             BtnStartAutoSingle.IsEnabled = false;
             TabCRP.IsEnabled = true; 
             TabLogs.IsEnabled = true;
+
+            // Restore calibration button if not actively calibrating
+            if (!isCalibrating && isSetupComplete)
+            {
+                BtnStartCalSingle.IsEnabled = true;
+                BtnStartCalCRP.IsEnabled = true;
+            }
+
             StopRecording();
             SendCommand("LOCK_SINGLE");
         }
@@ -820,6 +887,11 @@ namespace DynamometerGUI
             BtnStartAutoCRP.IsEnabled = true;
             TabSingle.IsEnabled = false;
             TabLogs.IsEnabled = false;
+
+            // Interlock: Disable calibration buttons while system is active
+            BtnStartCalSingle.IsEnabled = false;
+            BtnStartCalCRP.IsEnabled = false;
+
             SendCommand("UNLOCK_CRP");
         }
 
@@ -833,6 +905,14 @@ namespace DynamometerGUI
             BtnStartAutoCRP.IsEnabled = false;
             TabSingle.IsEnabled = true; 
             TabLogs.IsEnabled = true;
+
+            // Restore calibration button if not actively calibrating
+            if (!isCalibrating && isSetupComplete)
+            {
+                BtnStartCalSingle.IsEnabled = true;
+                BtnStartCalCRP.IsEnabled = true;
+            }
+
             StopRecording();
             SendCommand("LOCK_CRP");
         }
@@ -977,7 +1057,7 @@ namespace DynamometerGUI
         {
             try
             {
-                lock (serialLock)
+                lock (writeLock)
                 {
                     if (arduinoPort != null && arduinoPort.IsOpen)
                     {

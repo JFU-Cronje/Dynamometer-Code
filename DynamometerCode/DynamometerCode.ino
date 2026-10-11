@@ -104,11 +104,12 @@ float readACS724Current(int pin) {
   long sum = 0;
   for (int i = 0; i < 10; i++) {
     sum += analogRead(pin);
-    delayMicroseconds(500); // Allow ADC to settle and sample true noise profile
+    delayMicroseconds(500); 
   }
   float voltage = (sum / 10.0) * (5.0 / 1023.0);
   float current = (voltage - 0.5) / 0.200;
-  if (current < 0.15 && current > -0.15) return 0.0;
+  // Increase deadband to 0.45A to clean up the 0.41A idle resting offset
+  if (current < 0.45 && current > -0.45) return 0.0;
   return current;
 }
 
@@ -147,21 +148,29 @@ void runEscCalibration() {
   Serial.println("Calibration finished. Continuing to normal boot.");
 }
 
-void setup() {
-  Serial.begin(115200);
-  
-  Wire.begin(); 
-  Wire.setWireTimeout(25000, true); 
-
+void runI2CScan() {
   Serial.println("--- I2C SCAN START ---");
-  for (byte i = 8; i < 120; i++) {
+  byte count = 0;
+  for (byte i = 1; i < 127; i++) {
     Wire.beginTransmission(i);
     if (Wire.endTransmission() == 0) {
       Serial.print("Device found at 0x");
+      if (i < 16) Serial.print("0");
       Serial.println(i, HEX);
+      count++;
     }
   }
+  Serial.print("Total devices: ");
+  Serial.println(count);
   Serial.println("--- I2C SCAN END ---");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  Wire.begin(); 
+  Wire.setWireTimeout(25000, true); 
+  runI2CScan();
 
   initINA226(0x44); 
   initINA226(0x41); 
@@ -228,7 +237,10 @@ void loop() {
         currentOutputT1 = 0.0;
         currentOutputT2 = 0.0;
       }
-      inputBuffer = ""; 
+      else if (inputBuffer == "SCAN_I2C") {
+        runI2CScan();
+      }  
+      inputBuffer = "";
     } else {
       inputBuffer += c; 
     }
@@ -273,9 +285,22 @@ void loop() {
     float rawRpm2 = 0.0;
     unsigned long currentMicros = micros();
 
-    // Assign calculated RPM directly to raw variables
-    if ((currentMicros - t1 < 2000000) && p1 > 0) rawRpm1 = 60000000.0 / p1;
-    if ((currentMicros - t2 < 2000000) && p2 > 0) rawRpm2 = 60000000.0 / p2;
+    // 0.25-second timeout (250,000 us) allows speed to drop to 0 RPM quickly when stopping
+    const unsigned long RPM_TIMEOUT_MICROS = 250000;
+
+    if ((currentMicros - t1 < RPM_TIMEOUT_MICROS) && p1 > 0) {
+      rawRpm1 = 60000000.0 / p1;
+    } else {
+      rawRpm1 = 0.0;
+      pulsePeriod1 = 0; 
+    }
+
+    if ((currentMicros - t2 < RPM_TIMEOUT_MICROS) && p2 > 0) {
+      rawRpm2 = 60000000.0 / p2;
+    } else {
+      rawRpm2 = 0.0;
+      pulsePeriod2 = 0; 
+    }
 
     // Filter RPM spikes
     if (rawRpm1 > 0) filteredRpm1 = (filteredRpm1 * 0.7) + (rawRpm1 * 0.3);
