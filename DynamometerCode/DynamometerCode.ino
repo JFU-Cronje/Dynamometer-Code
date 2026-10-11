@@ -12,7 +12,7 @@ Servo escFront;
 Servo escBack;
 
 // Pin Mappings
-const int pinHandshake = 2; // Moved from 8 for Interrupt support
+const int pinHandshake = 2; 
 const int pinRpm2 = 3; 
 const int pinRpm1 = 4;
 const int pinEsc1 = 10;
@@ -20,6 +20,10 @@ const int pinEsc2 = 13;
 const int pinEscCal = A3;
 const int pinCurr1 = A1; 
 const int pinCurr2 = A2;
+
+// Auto-detected I2C addresses for INA226 voltage sensors
+uint8_t addrVolt1 = 0x40;
+uint8_t addrVolt2 = 0x41;
 
 // RPM Tracking with Debounce
 volatile unsigned long pulsePeriod1 = 0;
@@ -85,7 +89,7 @@ float readINA226Voltage(uint8_t address) {
   Wire.write(0x02); 
   if (Wire.endTransmission() != 0) return -1.0; 
   
-  delay(1);
+  delayMicroseconds(200);
   Wire.requestFrom(address, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint16_t val = (Wire.read() << 8) | Wire.read();
@@ -104,12 +108,12 @@ float readACS724Current(int pin) {
   long sum = 0;
   for (int i = 0; i < 10; i++) {
     sum += analogRead(pin);
-    delayMicroseconds(500); 
+    delayMicroseconds(200); 
   }
   float voltage = (sum / 10.0) * (5.0 / 1023.0);
   float current = (voltage - 0.5) / 0.200;
-  // Increase deadband to 0.45A to clean up the 0.41A idle resting offset
-  if (current < 0.45 && current > -0.45) return 0.0;
+  // Standard noise filter (reverted from 0.45A)
+  if (current < 0.10 && current > -0.10) return 0.0;
   return current;
 }
 
@@ -148,6 +152,14 @@ void runEscCalibration() {
   Serial.println("Calibration finished. Continuing to normal boot.");
 }
 
+uint8_t probeAddress(uint8_t a, uint8_t b) {
+  Wire.beginTransmission(a);
+  if (Wire.endTransmission() == 0) return a;
+  Wire.beginTransmission(b);
+  if (Wire.endTransmission() == 0) return b;
+  return a; 
+}
+
 void runI2CScan() {
   Serial.println("--- I2C SCAN START ---");
   byte count = 0;
@@ -172,8 +184,12 @@ void setup() {
   Wire.setWireTimeout(25000, true); 
   runI2CScan();
 
-  initINA226(0x44); 
-  initINA226(0x41); 
+  // Auto-detect whether modules are 0x40/0x44 or 0x41/0x45
+  addrVolt1 = probeAddress(0x40, 0x44);
+  addrVolt2 = probeAddress(0x41, 0x45);
+
+  initINA226(addrVolt1); 
+  initINA226(addrVolt2); 
 
   escFront.attach(pinEsc1, 1100, 1900);
   escBack.attach(pinEsc2, 1100, 1900);
@@ -190,9 +206,9 @@ void setup() {
   
   attachInterrupt(digitalPinToInterrupt(pinHandshake), megaReadyISR, RISING);
   attachInterrupt(digitalPinToInterrupt(pinRpm2), countRpm2, FALLING);
-  // Pin 4 does not support hardware interrupts, so we use Pin Change Interrupts
-  PCICR |= B00000100;  // Enable PCIE2 (Port D)
-  PCMSK2 |= B00010000; // Enable PCINT20 (Pin 4)
+  
+  PCICR |= B00000100;  
+  PCMSK2 |= B00010000; 
 
   Serial.println("Dynamometer Hardware Initialized - MAIN UNO");
 }
@@ -202,7 +218,6 @@ ISR(PCINT2_vect) {
 }
 
 void loop() {
-  // Parse incoming commands from PC
   while (Serial.available() > 0) {
     char c = Serial.read();
     if (c == '\n') {
@@ -224,7 +239,6 @@ void loop() {
       else if (inputBuffer.startsWith("S_T2_")) scaleT2 = inputBuffer.substring(5).toFloat();
       else if (inputBuffer.startsWith("S_Q2_")) scaleQ2 = inputBuffer.substring(5).toFloat();
       
-      // Forward Tare commands to the Mega over I2C
       else if (inputBuffer == "A" || inputBuffer == "C" || inputBuffer == "E" || inputBuffer == "G") {
         Wire.beginTransmission(8);
         Wire.write(inputBuffer.charAt(0));
@@ -254,7 +268,6 @@ void loop() {
     escBack.writeMicroseconds(1100 + (currentOutputT2 * 8.0));
   }
 
-  // Read load cells immediately when the hardware interrupt sets the flag
   if (megaDataReady) {
     if (Wire.requestFrom(8, 16) == 16) {
       for (int i = 0; i < 16; i++) {
@@ -279,13 +292,10 @@ void loop() {
     unsigned long t2 = lastPulseTime2;
     interrupts();
 
-    float currentRpm1 = 0;
-    float currentRpm2 = 0;
     float rawRpm1 = 0.0;
     float rawRpm2 = 0.0;
     unsigned long currentMicros = micros();
 
-    // 0.25-second timeout (250,000 us) allows speed to drop to 0 RPM quickly when stopping
     const unsigned long RPM_TIMEOUT_MICROS = 250000;
 
     if ((currentMicros - t1 < RPM_TIMEOUT_MICROS) && p1 > 0) {
@@ -302,15 +312,14 @@ void loop() {
       pulsePeriod2 = 0; 
     }
 
-    // Filter RPM spikes
     if (rawRpm1 > 0) filteredRpm1 = (filteredRpm1 * 0.7) + (rawRpm1 * 0.3);
     else filteredRpm1 = 0;
 
     if (rawRpm2 > 0) filteredRpm2 = (filteredRpm2 * 0.7) + (rawRpm2 * 0.3);
     else filteredRpm2 = 0;
 
-    float valVolt1 = readINA226Voltage(0x44); 
-    float valVolt2 = readINA226Voltage(0x41); 
+    float valVolt1 = readINA226Voltage(addrVolt1); 
+    float valVolt2 = readINA226Voltage(addrVolt2); 
     float valCurr1 = readACS724Current(pinCurr1);
     float valCurr2 = readACS724Current(pinCurr2);
 
@@ -331,7 +340,7 @@ void loop() {
     Serial.print(",");
     Serial.print(filteredRpm2, 0); 
     Serial.print(",");
-    Serial.print(valVolt2, 2);
+    Serial.print(valVolt2, 2); 
     Serial.print(",");
     Serial.println(valCurr2, 2);            
   }

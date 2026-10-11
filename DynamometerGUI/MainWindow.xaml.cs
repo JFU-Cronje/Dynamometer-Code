@@ -35,6 +35,8 @@ namespace DynamometerGUI
         Thread? serialWorkerThread;
         private volatile bool isSerialWorkerRunning = false;
         private readonly ConcurrentQueue<TelemetryPacket> telemetryQueue = new();
+        private readonly object csvLock = new object();
+        private volatile bool isCRPSelected = false;
 
         DispatcherTimer masterLoopTimer;
 
@@ -209,31 +211,7 @@ namespace DynamometerGUI
                         double mp2 = q2 * r2 * (2.0 * Math.PI / 60.0);
                         double me2 = ep2 > 0 ? (mp2 / ep2) * 100.0 : 0;
 
-                        // Background thread disk logging: SSD latency never impacts the UI thread
-                        if (isRecording && csvWriter != null)
-                        {
-                            TimeSpan elapsed = DateTime.Now - startTime;
-                            if (elapsed.TotalSeconds >= nextLogInterval)
-                            {
-                                TimeSpan exactLogTime = TimeSpan.FromSeconds(nextLogInterval);
-                                string elapsedLogTime = exactLogTime.ToString(@"hh\:mm\:ss\.fff");
-                                string actT1 = actualThrottle1.ToString("F0", CultureInfo.InvariantCulture);
-                                string actT2 = actualThrottle2.ToString("F0", CultureInfo.InvariantCulture);
-                                bool isCRP = TabCRP.IsSelected;
-
-                                string csvLine = string.Format(CultureInfo.InvariantCulture,
-                                    "{0},{1:F3},{2:F3},{3:F0},{4:F2},{5:F2},{6},{7:F2},{8:F2},{9:F2}," +
-                                    "{10:F3},{11:F3},{12:F0},{13:F2},{14:F2},{15},{16:F2},{17:F2},{18:F2}",
-                                    elapsedLogTime,
-                                    t1, q1, r1, v1, c1, actT1, ep1, mp1, me1,
-                                    isCRP ? t2 : 0, isCRP ? q2 : 0, isCRP ? r2 : 0, isCRP ? v2 : 0, isCRP ? c2 : 0,
-                                    actT2, isCRP ? ep2 : 0, isCRP ? mp2 : 0, isCRP ? me2 : 0);
-
-                                csvWriter.WriteLine(csvLine);
-                                nextLogInterval += 0.1;
-                            }
-                        }
-
+                        // 1. Enqueue telemetry FIRST so graphs NEVER freeze
                         telemetryQueue.Enqueue(new TelemetryPacket
                         {
                             Thrust1 = t1, Torque1 = q1, RPM1 = r1, Volt1 = v1, Curr1 = c1,
@@ -241,6 +219,37 @@ namespace DynamometerGUI
                             ElecPower1 = ep1, MechPower1 = mp1, MotorEff1 = me1,
                             ElecPower2 = ep2, MechPower2 = mp2, MotorEff2 = me2
                         });
+
+                        // 2. Thread-safe disk logging
+                        if (isRecording)
+                        {
+                            lock (csvLock)
+                            {
+                                if (isRecording && csvWriter != null)
+                                {
+                                    TimeSpan elapsed = DateTime.Now - startTime;
+                                    if (elapsed.TotalSeconds >= nextLogInterval)
+                                    {
+                                        TimeSpan exactLogTime = TimeSpan.FromSeconds(nextLogInterval);
+                                        string elapsedLogTime = exactLogTime.ToString(@"hh\:mm\:ss\.fff");
+                                        string actT1 = actualThrottle1.ToString("F0", CultureInfo.InvariantCulture);
+                                        string actT2 = actualThrottle2.ToString("F0", CultureInfo.InvariantCulture);
+                                        bool isCrp = isCRPSelected; // Uses thread-safe cached boolean
+
+                                        string csvLine = string.Format(CultureInfo.InvariantCulture,
+                                            "{0},{1:F3},{2:F3},{3:F0},{4:F2},{5:F2},{6},{7:F2},{8:F2},{9:F2}," +
+                                            "{10:F3},{11:F3},{12:F0},{13:F2},{14:F2},{15},{16:F2},{17:F2},{18:F2}",
+                                            elapsedLogTime,
+                                            t1, q1, r1, v1, c1, actT1, ep1, mp1, me1,
+                                            isCrp ? t2 : 0, isCrp ? q2 : 0, isCrp ? r2 : 0, isCrp ? v2 : 0, isCrp ? c2 : 0,
+                                            actT2, isCrp ? ep2 : 0, isCrp ? mp2 : 0, isCrp ? me2 : 0);
+
+                                        csvWriter.WriteLine(csvLine);
+                                        nextLogInterval += 0.1;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 catch (TimeoutException) { }
@@ -643,10 +652,15 @@ namespace DynamometerGUI
         {
             if (isRecording)
             {
-                isRecording = false;
+                lock (csvLock)
+                {
+                    isRecording = false;
+                    csvWriter?.Flush();
+                    csvWriter?.Close();
+                    csvWriter = null;
+                }
                 BtnRecordSingle.Content = "Record Manual Test";
                 BtnRecordCRP.Content = "Record Manual Test";
-                csvWriter?.Close();
                 LoadLogFiles();
             }
         }
@@ -719,6 +733,8 @@ namespace DynamometerGUI
 
         private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            isCRPSelected = TabCRP.IsSelected; // Thread-safe state caching
+
             if (e.Source is TabControl && PanelLiveDataInputsRoot != null)
             {
                 if (TabLogs.IsSelected)
@@ -993,15 +1009,18 @@ namespace DynamometerGUI
         {
             if (!isRecording)
             {
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string mode = isAutoRunning ? "Auto" : "Manual";
-                csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{mode}_{timestamp}.csv"));
-                csvWriter.AutoFlush = true;
-                csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2");
-                
-                startTime = DateTime.Now;
-                nextLogInterval = 0.1;
-                isRecording = true;
+                lock (csvLock)
+                {
+                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    string mode = isAutoRunning ? "Auto" : "Manual";
+                    csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{mode}_{timestamp}.csv"));
+                    csvWriter.AutoFlush = true;
+                    csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2");
+
+                    startTime = DateTime.Now;
+                    nextLogInterval = 0.1;
+                    isRecording = true;
+                }
                 
                 if (isAutoRunning)
                 {
