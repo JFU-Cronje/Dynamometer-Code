@@ -54,7 +54,7 @@ float filteredRpm2 = 0.0;
 void countRpm1() { 
   unsigned long now = micros();
   unsigned long interval = now - lastPulseTime1;
-  if (interval > 5000) {
+  if (interval > 6000) {
     pulsePeriod1 = interval; 
     lastPulseTime1 = now;
   }
@@ -63,7 +63,7 @@ void countRpm1() {
 void countRpm2() { 
   unsigned long now = micros();
   unsigned long interval = now - lastPulseTime2;
-  if (interval > 5000) {
+  if (interval > 6000) {
     pulsePeriod2 = interval; 
     lastPulseTime2 = now;
   }
@@ -273,8 +273,9 @@ void loop() {
     float rawRpm2 = 0.0;
     unsigned long currentMicros = micros();
 
-    if ((currentMicros - t1 < 2000000) && p1 > 0) currentRpm1 = 60000000.0 / p1;
-    if ((currentMicros - t2 < 2000000) && p2 > 0) currentRpm2 = 60000000.0 / p2;
+    // Assign calculated RPM directly to raw variables
+    if ((currentMicros - t1 < 2000000) && p1 > 0) rawRpm1 = 60000000.0 / p1;
+    if ((currentMicros - t2 < 2000000) && p2 > 0) rawRpm2 = 60000000.0 / p2;
 
     // Filter RPM spikes
     if (rawRpm1 > 0) filteredRpm1 = (filteredRpm1 * 0.7) + (rawRpm1 * 0.3);
