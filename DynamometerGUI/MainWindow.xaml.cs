@@ -106,12 +106,12 @@ namespace DynamometerGUI
             Directory.CreateDirectory(calSingleDir);
             Directory.CreateDirectory(calCRPDir);
 
-            // Single unified timer running at 20 Hz (50 ms)
+            // Master loop runs at 20 Hz (50 ms)
             masterLoopTimer = new DispatcherTimer(DispatcherPriority.Normal);
             masterLoopTimer.Interval = TimeSpan.FromMilliseconds(50);
             masterLoopTimer.Tick += MasterLoopTimer_Tick;
 
-            // Lock controls during the startup sequence
+            // Lock controls during startup
             ChkActivateSingle.IsEnabled = false;
             ChkActivateCRP.IsEnabled = false;
             BtnStartCalSingle.IsEnabled = false;
@@ -159,7 +159,6 @@ namespace DynamometerGUI
                     arduinoPort = port;
                     isSerialWorkerRunning = true;
                     
-                    // Dedicated thread eliminates serial reader lock contention
                     serialWorkerThread = new Thread(SerialWorkerLoop);
                     serialWorkerThread.IsBackground = true;
                     serialWorkerThread.Priority = ThreadPriority.AboveNormal;
@@ -211,7 +210,7 @@ namespace DynamometerGUI
                         double mp2 = q2 * r2 * (2.0 * Math.PI / 60.0);
                         double me2 = ep2 > 0 ? (mp2 / ep2) * 100.0 : 0;
 
-                        // 1. Enqueue telemetry FIRST so graphs NEVER freeze
+                        // 1. Enqueue telemetry first so charts update uninterrupted
                         telemetryQueue.Enqueue(new TelemetryPacket
                         {
                             Thrust1 = t1, Torque1 = q1, RPM1 = r1, Volt1 = v1, Curr1 = c1,
@@ -234,7 +233,7 @@ namespace DynamometerGUI
                                         string elapsedLogTime = exactLogTime.ToString(@"hh\:mm\:ss\.fff");
                                         string actT1 = actualThrottle1.ToString("F0", CultureInfo.InvariantCulture);
                                         string actT2 = actualThrottle2.ToString("F0", CultureInfo.InvariantCulture);
-                                        bool isCrp = isCRPSelected; // Uses thread-safe cached boolean
+                                        bool isCrp = isCRPSelected;
 
                                         string csvLine = string.Format(CultureInfo.InvariantCulture,
                                             "{0},{1:F3},{2:F3},{3:F0},{4:F2},{5:F2},{6},{7:F2},{8:F2},{9:F2}," +
@@ -266,7 +265,7 @@ namespace DynamometerGUI
             if (!isSetupComplete)
             {
                 startupCountdownTicks--;
-                if (startupCountdownTicks % 20 == 0) // Once every second
+                if (startupCountdownTicks % 20 == 0)
                 {
                     int secondsLeft = startupCountdownTicks / 20;
                     TxtStartupCountdown.Text = $"Hardware Initializing... Please wait ({secondsLeft}s)";
@@ -289,7 +288,7 @@ namespace DynamometerGUI
                 return;
             }
 
-            // 2. Telemetry Processing & Data Logging
+            // 2. Process Telemetry Packets
             bool hasNewData = false;
             while (telemetryQueue.TryDequeue(out var packet))
             {
@@ -317,7 +316,7 @@ namespace DynamometerGUI
                 dlBackRPMCRP?.Add(liveGraphTime, rpm2);
             }
 
-            // 3. Render Graphs (Only redrawn when new data arrives to save CPU load)
+            // 3. Render Active Charts
             if (hasNewData)
             {
                 double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
@@ -351,7 +350,16 @@ namespace DynamometerGUI
                 }
             }
 
-            // 4. Update UI Text Labels (Throttled to 5 Hz to eliminate layout invalidation stalls)
+            // 4. Update Recording Stopwatch at 20 Hz
+            if (isRecording)
+            {
+                TimeSpan elapsed = DateTime.Now - startTime;
+                string timeFormat = $"Time: {elapsed:hh\\:mm\\:ss\\.fff}";
+                TxtTimerSingle.Text = timeFormat;
+                TxtTimerCRP.Text = timeFormat;
+            }
+
+            // 5. Update UI Text Labels at 5 Hz
             textThrottleCounter++;
             if (textThrottleCounter >= 4)
             {
@@ -369,17 +377,9 @@ namespace DynamometerGUI
                 TxtBackElecPower.Text = $"Elec Power: {elecPower2:F2} W";
                 TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
                 TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
-
-                if (isRecording)
-                {
-                    TimeSpan elapsed = DateTime.Now - startTime;
-                    string timeFormat = $"Time: {elapsed:hh\\:mm\\:ss\\.fff}";
-                    TxtTimerSingle.Text = timeFormat;
-                    TxtTimerCRP.Text = timeFormat;
-                }
             }
 
-            // 5. Emergency Stop Button Countdown
+            // 6. Emergency Stop Button Countdown
             if (isStopping)
             {
                 TimeSpan elapsed = DateTime.Now - stopPressTime;
@@ -395,7 +395,7 @@ namespace DynamometerGUI
                 }
             }
 
-            // 6. Automatic Test Sequence
+            // 7. Automatic Test Sequencing
             if (isAutoRunning)
             {
                 autoTimer -= 0.05;
@@ -424,7 +424,7 @@ namespace DynamometerGUI
                 }
             }
 
-            // 7. Smooth Throttle Ramping Logic
+            // 8. Throttle Ramping
             if (actualThrottle1 < targetThrottle1)
                 actualThrottle1 = Math.Min(actualThrottle1 + RAMP_RATE, targetThrottle1);
             else if (actualThrottle1 > targetThrottle1)
@@ -453,7 +453,7 @@ namespace DynamometerGUI
                 lastSentThrottle2 = currentT2Int;
             }
 
-            // 8. Auto Test Interlock
+            // 9. Auto Test Interlock
             if (!isAutoRunning && isSetupComplete)
             {
                 if (ChkActivateSingle.IsChecked == true)
@@ -496,29 +496,47 @@ namespace DynamometerGUI
         {
             try
             {
-                string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
-                var latestFile = Directory.GetFiles(targetDir, "Calibration_*.csv")
-                                          .OrderByDescending(f => f)
-                                          .FirstOrDefault();
-
-                if (latestFile != null)
+                // 1. Load latest Front calibration (T1 and Q1)
+                var latestSingle = Directory.GetFiles(calSingleDir, "Calibration_*.csv")
+                                            .OrderByDescending(f => f)
+                                            .FirstOrDefault();
+                if (latestSingle != null)
                 {
-                    string[] lines = File.ReadAllLines(latestFile);
+                    string[] lines = File.ReadAllLines(latestSingle);
+                    if (lines.Length > 1)
+                    {
+                        string[] parts = lines[1].Split(',');
+                        if (parts.Length >= 2)
+                        {
+                            scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
+                            scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                        }
+                    }
+                }
+
+                // 2. Load latest Back calibration (T2 and Q2)
+                var latestCRP = Directory.GetFiles(calCRPDir, "Calibration_*.csv")
+                                         .OrderByDescending(f => f)
+                                         .FirstOrDefault();
+                if (latestCRP != null)
+                {
+                    string[] lines = File.ReadAllLines(latestCRP);
                     if (lines.Length > 1)
                     {
                         string[] parts = lines[1].Split(',');
                         if (parts.Length >= 4)
                         {
-                            scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
-                            scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
                             scaleT2 = double.Parse(parts[2], CultureInfo.InvariantCulture);
                             scaleQ2 = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                            
+                            // If on CRP tab, use front scales from CRP file as well
+                            if (TabCRP.IsSelected)
+                            {
+                                scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
+                                scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                            }
                         }
                     }
-                }
-                else
-                {
-                    scaleT1 = 1.0; scaleQ1 = 1.0; scaleT2 = 1.0; scaleQ2 = 1.0;
                 }
 
                 if (isSetupComplete)
@@ -733,7 +751,7 @@ namespace DynamometerGUI
 
         private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            isCRPSelected = TabCRP.IsSelected; // Thread-safe state caching
+            isCRPSelected = TabCRP.IsSelected;
 
             if (e.Source is TabControl && PanelLiveDataInputsRoot != null)
             {
@@ -741,6 +759,7 @@ namespace DynamometerGUI
                 {
                     PanelLiveDataInputsRoot.Visibility = Visibility.Hidden;
                     PanelLiveDataDerivedRoot.Visibility = Visibility.Hidden;
+                    LoadLogFiles(); // Automatically refresh recent CSV logs when opening the tab
                 }
                 else
                 {
@@ -924,7 +943,6 @@ namespace DynamometerGUI
             TabCRP.IsEnabled = false; 
             TabLogs.IsEnabled = false;
 
-            // Two-Way Interlock: Lock calibration buttons while system is active
             BtnStartCalSingle.IsEnabled = false;
             BtnStartCalCRP.IsEnabled = false;
 
@@ -959,7 +977,6 @@ namespace DynamometerGUI
             TabSingle.IsEnabled = false;
             TabLogs.IsEnabled = false;
 
-            // Two-Way Interlock: Lock calibration buttons while system is active
             BtnStartCalSingle.IsEnabled = false;
             BtnStartCalCRP.IsEnabled = false;
 
