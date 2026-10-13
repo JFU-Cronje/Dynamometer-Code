@@ -1033,18 +1033,32 @@ namespace DynamometerGUI
         {
             if (!isRecording)
             {
-                lock (csvLock)
-                {
-                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    string mode = isAutoRunning ? "Auto" : "Manual";
-                    csvWriter = new StreamWriter(Path.Combine(logDir, $"DynamometerData_{timestamp}_{mode}.csv"));
-                    csvWriter.AutoFlush = true;
-                    csvWriter.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,PropEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2,PropEff2");
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string mode = isAutoRunning ? "Auto" : "Manual";
+                string filePath = Path.Combine(logDir, $"DynamometerData_{timestamp}_{mode}.csv");
 
-                    startTime = DateTime.Now;
-                    nextLogInterval = 0.1;
-                    isRecording = true;
-                }
+                // Offload disk file creation to prevent stalling the UI dispatch loop
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        var writer = new StreamWriter(filePath);
+                        writer.AutoFlush = true;
+                        writer.WriteLine("Time,Thrust1,Torque1,RPM1,Voltage1,Current1,Throttle1,ElecPower1,MechPower1,MotorEff1,PropEff1,Thrust2,Torque2,RPM2,Voltage2,Current2,Throttle2,ElecPower2,MechPower2,MotorEff2,PropEff2");
+
+                        lock (csvLock)
+                        {
+                            csvWriter = writer;
+                            startTime = DateTime.Now;
+                            nextLogInterval = 0.1;
+                            isRecording = true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("File creation error: " + ex.Message);
+                    }
+                });
                 
                 if (isAutoRunning)
                 {

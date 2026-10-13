@@ -111,8 +111,9 @@ float readACS724Current(int pin) {
   }
   float voltage = (sum / 10.0) * (5.0 / 1023.0);
   float current = (voltage - 0.5) / 0.200;
-  // Standard noise filter (reverted from 0.45A)
-  if (current < 0.10 && current > -0.10) return 0.0;
+  
+  // Clamp negative noise to 0.0A so electrical power never reads negative
+  if (current < 0.0) current = 0.0;
   return current;
 }
 
