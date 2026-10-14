@@ -22,7 +22,12 @@ union FloatConverter {
   byte bytes[16];
 } megaData;
 
-volatile char pendingCommand = 0;
+// Latest raw readings and non-blocking tare offsets
+long lastRaw[4] = {0, 0, 0, 0};
+long tareOffset[4] = {0, 0, 0, 0};
+
+// Bit 0: Thrust1 ('A'), Bit 1: Torque1 ('C'), Bit 2: Thrust2 ('E'), Bit 3: Torque2 ('G')
+volatile uint8_t pendingTareMask = 0;
 
 void setup() {
   pinMode(pinHandshake, OUTPUT);
@@ -33,7 +38,6 @@ void setup() {
   loadCellThrust2.begin(pinThrust2_DT, pinThrust2_SCK);
   loadCellTorque2.begin(pinTorque2_DT, pinTorque2_SCK);
 
-  // Auto-zero all load cells on boot to eliminate massive uncalibrated offsets
   unsigned long t0 = millis();
   while (millis() - t0 < 1000) {
     if (loadCellThrust1.is_ready() && loadCellTorque1.is_ready() &&
@@ -41,47 +45,60 @@ void setup() {
       break;
     }
   }
-  loadCellThrust1.tare(10);
-  loadCellTorque1.tare(10);
-  loadCellThrust2.tare(10);
-  loadCellTorque2.tare(10);
 
-  Wire.begin(8); 
+  // Initial boot average tare
+  if (loadCellThrust1.is_ready()) { lastRaw[0] = loadCellThrust1.read_average(10); tareOffset[0] = lastRaw[0]; }
+  if (loadCellTorque1.is_ready()) { lastRaw[1] = loadCellTorque1.read_average(10); tareOffset[1] = lastRaw[1]; }
+  if (loadCellThrust2.is_ready()) { lastRaw[2] = loadCellThrust2.read_average(10); tareOffset[2] = lastRaw[2]; }
+  if (loadCellTorque2.is_ready()) { lastRaw[3] = loadCellTorque2.read_average(10); tareOffset[3] = lastRaw[3]; }
+
+  Wire.begin(8);
+  Wire.setClock(400000);
   Wire.onRequest(requestEvent); 
   Wire.onReceive(receiveEvent);
 }
 
 void loop() {
-  if (pendingCommand != 0) {
-    char cmd = pendingCommand;
-    pendingCommand = 0;
-    if (cmd == 'A') loadCellThrust1.tare(5);
-    if (cmd == 'C') loadCellTorque1.tare(5);
-    if (cmd == 'E') loadCellThrust2.tare(5);
-    if (cmd == 'G') loadCellTorque2.tare(5);
+  bool updated = false;
+
+  if (loadCellThrust1.is_ready()) { lastRaw[0] = loadCellThrust1.read(); updated = true; }
+  if (loadCellTorque1.is_ready()) { lastRaw[1] = loadCellTorque1.read(); updated = true; }
+  if (loadCellThrust2.is_ready()) { lastRaw[2] = loadCellThrust2.read(); updated = true; }
+  if (loadCellTorque2.is_ready()) { lastRaw[3] = loadCellTorque2.read(); updated = true; }
+
+  // Instantaneous non-blocking tare using the latest sample
+  if (pendingTareMask != 0) {
+    noInterrupts();
+    uint8_t mask = pendingTareMask;
+    pendingTareMask = 0;
+    interrupts();
+
+    if (mask & 0x01) tareOffset[0] = lastRaw[0];
+    if (mask & 0x02) tareOffset[1] = lastRaw[1];
+    if (mask & 0x04) tareOffset[2] = lastRaw[2];
+    if (mask & 0x08) tareOffset[3] = lastRaw[3];
+    updated = true;
   }
 
-  float t1 = megaData.val[0];
-  float q1 = megaData.val[1];
-  float t2 = megaData.val[2];
-  float q2 = megaData.val[3];
+  if (updated) {
+    float t1 = (float)(lastRaw[0] - tareOffset[0]);
+    float q1 = (float)(lastRaw[1] - tareOffset[1]);
+    float t2 = (float)(lastRaw[2] - tareOffset[2]);
+    float q2 = (float)(lastRaw[3] - tareOffset[3]);
 
-  if (loadCellThrust1.is_ready()) t1 = loadCellThrust1.get_units(1);
-  if (loadCellTorque1.is_ready()) q1 = loadCellTorque1.get_units(1);
-  if (loadCellThrust2.is_ready()) t2 = loadCellThrust2.get_units(1);
-  if (loadCellTorque2.is_ready()) q2 = loadCellTorque2.get_units(1);
+    noInterrupts();
+    megaData.val[0] = t1;
+    megaData.val[1] = q1;
+    megaData.val[2] = t2;
+    megaData.val[3] = q2;
+    interrupts();
 
-  noInterrupts();
-  megaData.val[0] = t1;
-  megaData.val[1] = q1;
-  megaData.val[2] = t2;
-  megaData.val[3] = q2;
-  interrupts();
+    digitalWrite(pinHandshake, HIGH);
+    delayMicroseconds(500);
+    digitalWrite(pinHandshake, LOW);
+  }
 
-  digitalWrite(pinHandshake, HIGH);
-  delayMicroseconds(500);
-  digitalWrite(pinHandshake, LOW);
-  delay(15);
+  delay(2);
 }
 
 void requestEvent() {
@@ -90,6 +107,11 @@ void requestEvent() {
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    pendingCommand = Wire.read();
+    char cmd = Wire.read();
+    if (cmd == 'A') pendingTareMask |= 0x01;
+    else if (cmd == 'C') pendingTareMask |= 0x02;
+    else if (cmd == 'E') pendingTareMask |= 0x04;
+    else if (cmd == 'G') pendingTareMask |= 0x08;
+    else if (cmd == 'Z') pendingTareMask |= 0x0F;
   }
 }

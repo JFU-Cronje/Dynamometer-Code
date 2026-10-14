@@ -7,7 +7,6 @@ using System.IO.Ports;
 using System.Windows.Threading;
 using System.Windows.Input;
 using System.Linq;
-using System.Data;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -15,15 +14,241 @@ using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using System.Threading;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace DynamometerGUI
 {
     public struct TelemetryPacket
     {
+        public double RawT1, RawQ1, RawT2, RawQ2;
         public double Thrust1, Torque1, RPM1, Volt1, Curr1;
         public double Thrust2, Torque2, RPM2, Volt2, Curr2;
         public double ElecPower1, MechPower1, MotorEff1, PropEff1;
         public double ElecPower2, MechPower2, MotorEff2, PropEff2;
+    }
+
+    public sealed class LogRow
+    {
+        public string Time { get; set; } = "";
+        public string Thrust1 { get; set; } = "";
+        public string Torque1 { get; set; } = "";
+        public string RPM1 { get; set; } = "";
+        public string Voltage1 { get; set; } = "";
+        public string Current1 { get; set; } = "";
+        public string Throttle1 { get; set; } = "";
+        public string ElecPower1 { get; set; } = "";
+        public string MechPower1 { get; set; } = "";
+        public string MotorEff1 { get; set; } = "";
+        public string PropEff1 { get; set; } = "";
+        public string Thrust2 { get; set; } = "";
+        public string Torque2 { get; set; } = "";
+        public string RPM2 { get; set; } = "";
+        public string Voltage2 { get; set; } = "";
+        public string Current2 { get; set; } = "";
+        public string Throttle2 { get; set; } = "";
+        public string ElecPower2 { get; set; } = "";
+        public string MechPower2 { get; set; } = "";
+        public string MotorEff2 { get; set; } = "";
+        public string PropEff2 { get; set; } = "";
+    }
+
+    // 3-Point Monotone Cubic Hermite Spline Calibrator anchored at (0,0)
+    public class SplineCalibrator
+    {
+        public double[] WeightsGrams { get; private set; } = { 176.0, 402.06, 1000.0 };
+        public double[] RawCounts { get; private set; } = { 1725.97, 3942.86, 9806.65 };
+        public double[] TargetValues { get; private set; } = { 1.72597, 3.94286, 9.80665 };
+        public bool[] PointCaptured { get; private set; } = { false, false, false };
+
+        private double[] uKnots = new double[4];
+        private double[] yKnots = new double[4];
+        private double[] tangents = new double[4];
+        private double sign = 1.0;
+        private bool isValid = false;
+
+        public void ResetCaptureFlags()
+        {
+            PointCaptured[0] = false;
+            PointCaptured[1] = false;
+            PointCaptured[2] = false;
+        }
+
+        public void SyncWeightsAndTargets(double[] weightsGrams, bool isTorque)
+        {
+            double armFactor = isTorque ? 0.150 : 1.0;
+            for (int i = 0; i < 3; i++)
+            {
+                WeightsGrams[i] = weightsGrams[i];
+                TargetValues[i] = (weightsGrams[i] / 1000.0) * 9.80665 * armFactor;
+            }
+        }
+
+        public void SetPoint(int index, double weightG, double rawVal, double targetVal)
+        {
+            if (index < 0 || index > 2 || Math.Abs(rawVal) < 1e-6) return;
+
+            WeightsGrams[index] = weightG;
+            RawCounts[index] = rawVal;
+            TargetValues[index] = targetVal;
+            PointCaptured[index] = true;
+
+            // Fill uncaptured points proportionally so live readout updates immediately after 1st or 2nd weight
+            double currentRatio = rawVal / targetVal;
+            for (int i = 0; i < 3; i++)
+            {
+                if (!PointCaptured[i])
+                {
+                    RawCounts[i] = TargetValues[i] * currentRatio;
+                }
+            }
+            RebuildSpline();
+        }
+
+        public void LoadFromCsvRow(double w1, double w2, double w3, double r1, double r2, double r3, bool isTorque)
+        {
+            WeightsGrams[0] = w1; WeightsGrams[1] = w2; WeightsGrams[2] = w3;
+            RawCounts[0] = r1; RawCounts[1] = r2; RawCounts[2] = r3;
+
+            double armFactor = isTorque ? 0.150 : 1.0;
+            TargetValues[0] = (w1 / 1000.0) * 9.80665 * armFactor;
+            TargetValues[1] = (w2 / 1000.0) * 9.80665 * armFactor;
+            TargetValues[2] = (w3 / 1000.0) * 9.80665 * armFactor;
+
+            PointCaptured[0] = true; PointCaptured[1] = true; PointCaptured[2] = true;
+            RebuildSpline();
+        }
+
+        public void LoadLegacySingleScale(double scale, bool isTorque)
+        {
+            if (Math.Abs(scale) < 1e-12) scale = 1.0;
+            double armFactor = isTorque ? 0.150 : 1.0;
+            for (int i = 0; i < 3; i++)
+            {
+                TargetValues[i] = (WeightsGrams[i] / 1000.0) * 9.80665 * armFactor;
+                RawCounts[i] = TargetValues[i] / scale;
+                PointCaptured[i] = true;
+            }
+            RebuildSpline();
+        }
+
+        public void RebuildSpline()
+        {
+            sign = RawCounts[2] >= 0 ? 1.0 : -1.0;
+
+            // Sort knots by magnitude to guarantee strictly increasing x coordinates
+            var pairs = new (double u, double y)[]
+            {
+                (Math.Abs(RawCounts[0]), TargetValues[0]),
+                (Math.Abs(RawCounts[1]), TargetValues[1]),
+                (Math.Abs(RawCounts[2]), TargetValues[2])
+            }.OrderBy(p => p.u).ToArray();
+
+            uKnots[0] = 0.0;
+            yKnots[0] = 0.0;
+            for (int i = 0; i < 3; i++)
+            {
+                uKnots[i + 1] = pairs[i].u;
+                yKnots[i + 1] = pairs[i].y;
+            }
+
+            // Ensure strictly positive intervals
+            for (int i = 1; i < 4; i++)
+            {
+                if (uKnots[i] <= uKnots[i - 1] + 1e-6)
+                {
+                    uKnots[i] = uKnots[i - 1] + 1.0;
+                }
+            }
+
+            double[] d = new double[3];
+            for (int i = 0; i < 3; i++)
+            {
+                d[i] = (yKnots[i + 1] - yKnots[i]) / (uKnots[i + 1] - uKnots[i]);
+            }
+
+            tangents[0] = d[0];
+            tangents[1] = 0.5 * (d[0] + d[1]);
+            tangents[2] = 0.5 * (d[1] + d[2]);
+            tangents[3] = d[2];
+
+            // Fritsch-Carlson monotonicity constraint
+            for (int i = 0; i < 3; i++)
+            {
+                if (Math.Abs(d[i]) < 1e-12)
+                {
+                    tangents[i] = 0.0;
+                    tangents[i + 1] = 0.0;
+                }
+                else
+                {
+                    double alpha = tangents[i] / d[i];
+                    double beta = tangents[i + 1] / d[i];
+                    double hypot = Math.Sqrt(alpha * alpha + beta * beta);
+                    if (hypot > 3.0)
+                    {
+                        double tau = 3.0 / hypot;
+                        tangents[i] = tau * alpha * d[i];
+                        tangents[i + 1] = tau * beta * d[i];
+                    }
+                }
+            }
+
+            isValid = true;
+        }
+
+        public double Evaluate(double rawReading)
+        {
+            if (!isValid) return rawReading;
+
+            double u = rawReading * sign;
+            if (u < 0.0)
+            {
+                return u * tangents[0];
+            }
+            if (u >= uKnots[3])
+            {
+                return yKnots[3] + (u - uKnots[3]) * tangents[3];
+            }
+
+            int k = 0;
+            if (u >= uKnots[2]) k = 2;
+            else if (u >= uKnots[1]) k = 1;
+
+            double h = uKnots[k + 1] - uKnots[k];
+            double t = (u - uKnots[k]) / h;
+            double t2 = t * t;
+            double t3 = t2 * t;
+
+            double h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+            double h10 = t3 - 2.0 * t2 + t;
+            double h01 = -2.0 * t3 + 3.0 * t2;
+            double h11 = t3 - t2;
+
+            return h00 * yKnots[k] + h10 * h * tangents[k] + h01 * yKnots[k + 1] + h11 * h * tangents[k + 1];
+        }
+
+        public string GetSummaryText()
+        {
+            return $"Knots: ({RawCounts[0]:F0} -> {TargetValues[0]:F2}), ({RawCounts[1]:F0} -> {TargetValues[1]:F2}), ({RawCounts[2]:F0} -> {TargetValues[2]:F2})";
+        }
+
+        public SplineCalibrator Clone()
+        {
+            var copy = new SplineCalibrator
+            {
+                sign = this.sign,
+                isValid = this.isValid
+            };
+            Array.Copy(this.WeightsGrams, copy.WeightsGrams, 3);
+            Array.Copy(this.RawCounts, copy.RawCounts, 3);
+            Array.Copy(this.TargetValues, copy.TargetValues, 3);
+            Array.Copy(this.PointCaptured, copy.PointCaptured, 3);
+            Array.Copy(this.uKnots, copy.uKnots, 4);
+            Array.Copy(this.yKnots, copy.yKnots, 4);
+            Array.Copy(this.tangents, copy.tangents, 4);
+            return copy;
+        }
     }
 
     public partial class MainWindow : Window
@@ -31,12 +256,43 @@ namespace DynamometerGUI
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+        private const double GRAVITY = 9.80665;
+        private const double TORQUE_ARM_M = 0.150;
+
+        // Pre-cached frozen brushes and logos for stutter-free theme switching
+        private static readonly SolidColorBrush BrushLightMainBg = CreateFrozenBrush("#edf0f4");
+        private static readonly SolidColorBrush BrushLightMainFg = CreateFrozenBrush("#000000");
+        private static readonly SolidColorBrush BrushLightBtnBg = CreateFrozenBrush("#D0D9E4");
+        private static readonly SolidColorBrush BrushLightHoverBtnBg = CreateFrozenBrush("#B8C5D1");
+        private static readonly SolidColorBrush BrushLightDisabledBtnBg = CreateFrozenBrush("#cccccc");
+        private static readonly SolidColorBrush BrushLightControlBg = CreateFrozenBrush("#FFFFFF");
+
+        private static readonly SolidColorBrush BrushDarkMainBg = CreateFrozenBrush("#1E1E1E");
+        private static readonly SolidColorBrush BrushDarkMainFg = CreateFrozenBrush("#FFFFFF");
+        private static readonly SolidColorBrush BrushDarkBtnBg = CreateFrozenBrush("#3E3E42");
+        private static readonly SolidColorBrush BrushDarkHoverBtnBg = CreateFrozenBrush("#555555");
+        private static readonly SolidColorBrush BrushDarkDisabledBtnBg = CreateFrozenBrush("#2D2D30");
+        private static readonly SolidColorBrush BrushDarkControlBg = CreateFrozenBrush("#2D2D30");
+
+        private static readonly ScottPlot.Color SpDarkBg = ScottPlot.Color.FromHex("#1E1E1E");
+        private static readonly ScottPlot.Color SpDarkFg = ScottPlot.Color.FromHex("#FFFFFF");
+        private static readonly ScottPlot.Color SpDarkGrid = ScottPlot.Color.FromHex("#444444");
+        private static readonly ScottPlot.Color SpDarkLine = ScottPlot.Color.FromHex("#FFC107");
+
+        private static readonly ScottPlot.Color SpLightBg = ScottPlot.Color.FromHex("#edf0f4");
+        private static readonly ScottPlot.Color SpLightGrid = ScottPlot.Color.FromHex("#DDDDDD");
+
+        private BitmapImage? logoLight;
+        private BitmapImage? logoDark;
+
         SerialPort? arduinoPort;
         Thread? serialWorkerThread;
         private volatile bool isSerialWorkerRunning = false;
         private readonly ConcurrentQueue<TelemetryPacket> telemetryQueue = new();
+        private readonly ConcurrentQueue<string> serialCommandQueue = new();
         private readonly object csvLock = new object();
         private volatile bool isCRPSelected = false;
+        private bool lastActiveTestTabIsCRP = false;
 
         DispatcherTimer masterLoopTimer;
 
@@ -47,7 +303,8 @@ namespace DynamometerGUI
         bool isStopping = false;
         StreamWriter? csvWriter = null;
         
-        // Data variables
+        // Live data variables
+        double rawThrust1, rawTorque1, rawThrust2, rawTorque2;
         double thrust1, torque1, rpm1, volt1, curr1;
         double thrust2, torque2, rpm2, volt2, curr2;
         double elecPower1, mechPower1, motorEff1, propEff1;
@@ -66,8 +323,8 @@ namespace DynamometerGUI
         bool isAutoRunning = false;
         int autoPhase = 0;
         double autoTimer = 0;
-        int autoTotalSteps = 5;
-        double autoStepDuration = 2.0;
+        int autoTotalSteps = 6;
+        double autoStepDuration = 10.0;
         double[] autoTargetsFront = new double[6];
         double[] autoTargetsBack = new double[6];
 
@@ -81,19 +338,30 @@ namespace DynamometerGUI
         private bool isSetupComplete = false;
         private int startupCountdownTicks = 200; // 200 ticks * 50ms = 10.0s
         private int textThrottleCounter = 0;
-
-        // Known Calibration Constants (176g mass, 150mm arm)
-        const double TARGET_THRUST_N = 0.176 * 9.80665;        // 1.72597 N
-        const double TARGET_TORQUE_NM = TARGET_THRUST_N * 0.150; // 0.25890 Nm
+        private int logLoadVersion = 0;
 
         // Application Local Directories
         string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DynoLogs");
         string calSingleDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DynoCalibrationsSingle");
         string calCRPDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DynoCalibrationsCRP");
         
-        // Calibration State
+        // Calibration State & Splines
         bool isCalibrating = false;
-        double scaleT1 = 1.0, scaleQ1 = 1.0, scaleT2 = 1.0, scaleQ2 = 1.0;
+        double[] calWeightsGrams = new double[] { 176.0, 402.06, 1000.0 };
+
+        // Active splines accessed by background thread via volatile reference swap
+        private volatile SplineCalibrator activeSplineT1 = new();
+        private volatile SplineCalibrator activeSplineQ1 = new();
+        private volatile SplineCalibrator activeSplineT2 = new();
+        private volatile SplineCalibrator activeSplineQ2 = new();
+
+        // Cached Single and CRP Splines
+        private SplineCalibrator singleSplineT1 = new();
+        private SplineCalibrator singleSplineQ1 = new();
+        private SplineCalibrator crpSplineT1 = new();
+        private SplineCalibrator crpSplineQ1 = new();
+        private SplineCalibrator crpSplineT2 = new();
+        private SplineCalibrator crpSplineQ2 = new();
 
         public MainWindow()
         {
@@ -106,7 +374,11 @@ namespace DynamometerGUI
             Directory.CreateDirectory(calSingleDir);
             Directory.CreateDirectory(calCRPDir);
 
-            // Master loop runs at 20 Hz (50 ms)
+            PreloadLogos();
+
+            // Pre-initialize DataGrid item container generator
+            DataGridLogs.ItemsSource = Array.Empty<LogRow>();
+
             masterLoopTimer = new DispatcherTimer(DispatcherPriority.Normal);
             masterLoopTimer.Interval = TimeSpan.FromMilliseconds(50);
             masterLoopTimer.Tick += MasterLoopTimer_Tick;
@@ -114,19 +386,88 @@ namespace DynamometerGUI
             // Lock controls during startup
             ChkActivateSingle.IsEnabled = false;
             ChkActivateCRP.IsEnabled = false;
-            BtnStartCalSingle.IsEnabled = false;
-            BtnStartCalCRP.IsEnabled = false;
+            BtnTareSingleTab.IsEnabled = false;
+            BtnTareCRPTab.IsEnabled = false;
+            BtnStartCal.IsEnabled = false;
+            BtnPostCalTareAll.IsEnabled = false;
 
+            UpdateTargetWeightLabels(formatBoxes: true);
             InitializeGraphAxes();
             LoadLogFiles();
-            LoadLatestCalibration();
+            LoadLatestCalibrationFromDisk();
             AutoConnectArduino(); 
+        }
+
+        private void PreloadLogos()
+        {
+            try
+            {
+                logoLight = new BitmapImage();
+                logoLight.BeginInit();
+                logoLight.UriSource = new Uri("pack://application:,,,/Dynamometer Logo NoText NoBackground.png");
+                logoLight.CacheOption = BitmapCacheOption.OnLoad;
+                logoLight.EndInit();
+                logoLight.Freeze();
+            }
+            catch { }
+
+            try
+            {
+                logoDark = new BitmapImage();
+                logoDark.BeginInit();
+                logoDark.UriSource = new Uri("pack://application:,,,/Dynamometer Logo NoText DarkMode NoBackground.png");
+                logoDark.CacheOption = BitmapCacheOption.OnLoad;
+                logoDark.EndInit();
+                logoDark.Freeze();
+            }
+            catch { }
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
             ApplyTitleBarTheme(CmbTheme.SelectedIndex == 1);
+            UpdateHeaderCenterAlignment();
             masterLoopTimer.Start();
+        }
+
+        private void HeaderGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            UpdateHeaderCenterAlignment();
+        }
+
+        private void UpdateHeaderCenterAlignment()
+        {
+            if (HeaderGrid == null || PanelLogoTitle == null || PanelEmergencyStop == null || PanelLiveDataInputsRoot == null) return;
+            if (PanelLiveDataInputsRoot.Visibility != Visibility.Visible) return;
+
+            double totalWidth = HeaderGrid.ActualWidth;
+            if (totalWidth <= 0) return;
+
+            double leftFixedWidth = PanelLogoTitle.ActualWidth + PanelLogoTitle.Margin.Left + PanelLogoTitle.Margin.Right
+                                  + PanelEmergencyStop.ActualWidth + PanelEmergencyStop.Margin.Left + PanelEmergencyStop.Margin.Right;
+
+            double inputsColumnWidth = PanelBackDataInputs.Visibility == Visibility.Visible ? 300.0 : 150.0;
+            double inputsTotalWidth = inputsColumnWidth + PanelLiveDataInputsRoot.Margin.Left + PanelLiveDataInputsRoot.Margin.Right;
+
+            double targetSpacer = (totalWidth / 2.0) - leftFixedWidth - inputsTotalWidth;
+            ColLeftCenterSpacer.Width = new GridLength(Math.Max(0.0, targetSpacer));
+        }
+
+        private void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (Keyboard.FocusedElement is TextBox focusedBox)
+            {
+                DependencyObject? clicked = e.OriginalSource as DependencyObject;
+                while (clicked != null && clicked != focusedBox)
+                {
+                    clicked = VisualTreeHelper.GetParent(clicked);
+                }
+                if (clicked != focusedBox)
+                {
+                    Keyboard.ClearFocus();
+                    FocusManager.SetFocusedElement(this, this);
+                }
+            }
         }
 
         protected override void OnClosed(EventArgs e)
@@ -152,7 +493,7 @@ namespace DynamometerGUI
                     var port = new SerialPort(portName, 115200);
                     port.NewLine = "\n";
                     port.WriteTimeout = 100; 
-                    port.ReadTimeout = 300;
+                    port.ReadTimeout = 200;
                     port.DtrEnable = true;
                     port.Open();
 
@@ -182,6 +523,15 @@ namespace DynamometerGUI
                         continue;
                     }
 
+                    // Flush queued outgoing commands on the worker thread so the UI thread never blocks
+                    while (serialCommandQueue.TryDequeue(out string? cmd))
+                    {
+                        if (!string.IsNullOrEmpty(cmd))
+                        {
+                            arduinoPort.Write(cmd + "\n");
+                        }
+                    }
+
                     string line = arduinoPort.ReadLine().Trim();
 
                     if (!isSetupComplete || line.StartsWith("CAL:") || line.StartsWith("---"))
@@ -191,17 +541,22 @@ namespace DynamometerGUI
 
                     string[] parts = line.Split(',');
                     if (parts.Length == 10 &&
-                        double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double t1) &&
-                        double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out double q1) &&
-                        double.TryParse(parts[2], NumberStyles.Any, CultureInfo.InvariantCulture, out double r1) &&
-                        double.TryParse(parts[3], NumberStyles.Any, CultureInfo.InvariantCulture, out double v1) &&
-                        double.TryParse(parts[4], NumberStyles.Any, CultureInfo.InvariantCulture, out double c1) &&
-                        double.TryParse(parts[5], NumberStyles.Any, CultureInfo.InvariantCulture, out double t2) &&
-                        double.TryParse(parts[6], NumberStyles.Any, CultureInfo.InvariantCulture, out double q2) &&
-                        double.TryParse(parts[7], NumberStyles.Any, CultureInfo.InvariantCulture, out double r2) &&
-                        double.TryParse(parts[8], NumberStyles.Any, CultureInfo.InvariantCulture, out double v2) &&
-                        double.TryParse(parts[9], NumberStyles.Any, CultureInfo.InvariantCulture, out double c2))
+                        double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double rawT1) &&
+                        double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double rawQ1) &&
+                        double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double r1) &&
+                        double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double v1) &&
+                        double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double c1) &&
+                        double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double rawT2) &&
+                        double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out double rawQ2) &&
+                        double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out double r2) &&
+                        double.TryParse(parts[8], NumberStyles.Float, CultureInfo.InvariantCulture, out double v2) &&
+                        double.TryParse(parts[9], NumberStyles.Float, CultureInfo.InvariantCulture, out double c2))
                     {
+                        double t1 = activeSplineT1.Evaluate(rawT1);
+                        double q1 = activeSplineQ1.Evaluate(rawQ1);
+                        double t2 = activeSplineT2.Evaluate(rawT2);
+                        double q2 = activeSplineQ2.Evaluate(rawQ2);
+
                         double ep1 = v1 * c1;
                         double mp1 = q1 * r1 * (2.0 * Math.PI / 60.0);
                         double me1 = ep1 > 0 ? (mp1 / ep1) * 100.0 : 0;
@@ -212,16 +567,15 @@ namespace DynamometerGUI
                         double me2 = ep2 > 0 ? (mp2 / ep2) * 100.0 : 0;
                         double pe2 = mp2 > 0 ? (t2 / mp2) : 0;
 
-                        // 1. Enqueue telemetry first so charts update uninterrupted
                         telemetryQueue.Enqueue(new TelemetryPacket
                         {
+                            RawT1 = rawT1, RawQ1 = rawQ1, RawT2 = rawT2, RawQ2 = rawQ2,
                             Thrust1 = t1, Torque1 = q1, RPM1 = r1, Volt1 = v1, Curr1 = c1,
                             Thrust2 = t2, Torque2 = q2, RPM2 = r2, Volt2 = v2, Curr2 = c2,
                             ElecPower1 = ep1, MechPower1 = mp1, MotorEff1 = me1, PropEff1 = pe1,
                             ElecPower2 = ep2, MechPower2 = mp2, MotorEff2 = me2, PropEff2 = pe2
                         });
 
-                        // 2. Thread-safe disk logging
                         if (isRecording)
                         {
                             lock (csvLock)
@@ -278,12 +632,15 @@ namespace DynamometerGUI
                     isSetupComplete = true;
                     BorderStartupNotice.Visibility = Visibility.Collapsed;
 
-                    SendCalibrationToArduino();
+                    EnsureArduinoUnityScale();
+                    ApplyActiveCalibrationForCurrentTab();
 
                     ChkActivateSingle.IsEnabled = true;
                     ChkActivateCRP.IsEnabled = true;
-                    BtnStartCalSingle.IsEnabled = true;
-                    BtnStartCalCRP.IsEnabled = true;
+                    BtnTareSingleTab.IsEnabled = true;
+                    BtnTareCRPTab.IsEnabled = true;
+                    BtnStartCal.IsEnabled = true;
+                    BtnPostCalTareAll.IsEnabled = true;
 
                     ResetGraphAxesY();
                 }
@@ -294,6 +651,8 @@ namespace DynamometerGUI
             bool hasNewData = false;
             while (telemetryQueue.TryDequeue(out var packet))
             {
+                rawThrust1 = packet.RawT1; rawTorque1 = packet.RawQ1;
+                rawThrust2 = packet.RawT2; rawTorque2 = packet.RawQ2;
                 thrust1 = packet.Thrust1; torque1 = packet.Torque1; rpm1 = packet.RPM1; volt1 = packet.Volt1; curr1 = packet.Curr1;
                 thrust2 = packet.Thrust2; torque2 = packet.Torque2; rpm2 = packet.RPM2; volt2 = packet.Volt2; curr2 = packet.Curr2;
                 elecPower1 = packet.ElecPower1; mechPower1 = packet.MechPower1; motorEff1 = packet.MotorEff1; propEff1 = packet.PropEff1;
@@ -302,8 +661,8 @@ namespace DynamometerGUI
                 liveGraphTime += 0.1;
                 hasNewData = true;
 
-                double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / 9.80665 : thrust1;
-                double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / 9.80665 : thrust2;
+                double displayThrust1 = CmbThrustUnit.SelectedIndex == 0 ? thrust1 / GRAVITY : thrust1;
+                double displayThrust2 = CmbThrustUnit.SelectedIndex == 0 ? thrust2 / GRAVITY : thrust2;
 
                 dlFrontThrustSingle?.Add(liveGraphTime, displayThrust1);
                 dlFrontTorqueSingle?.Add(liveGraphTime, torque1);
@@ -381,9 +740,22 @@ namespace DynamometerGUI
                 TxtBackMechPower.Text = $"Mech Power: {mechPower2:F2} W";
                 TxtBackMotorEff.Text = $"Motor Eff: {motorEff2:F2} %";
                 TxtBackPropEff.Text = $"Prop Eff: {propEff2:F3} N/W";
+
+                if (TabCalibration.IsSelected)
+                {
+                    TxtCalLiveThrust1.Text = $"Front Thrust: {thrust1:F3} N ({(thrust1 / GRAVITY):F3} kgf)";
+                    TxtCalLiveTorque1.Text = $"Front Torque: {torque1:F4} Nm";
+                    TxtCalScaleT1.Text = activeSplineT1.GetSummaryText();
+                    TxtCalScaleQ1.Text = activeSplineQ1.GetSummaryText();
+
+                    TxtCalLiveThrust2.Text = $"Back Thrust: {thrust2:F3} N ({(thrust2 / GRAVITY):F3} kgf)";
+                    TxtCalLiveTorque2.Text = $"Back Torque: {torque2:F4} Nm";
+                    TxtCalScaleT2.Text = activeSplineT2.GetSummaryText();
+                    TxtCalScaleQ2.Text = activeSplineQ2.GetSummaryText();
+                }
             }
 
-            // 6. Emergency Stop Button Countdown
+            // 6. Emergency Stop Countdown
             if (isStopping)
             {
                 TimeSpan elapsed = DateTime.Now - stopPressTime;
@@ -473,111 +845,283 @@ namespace DynamometerGUI
 
         public void SendCommand(string command)
         {
-            try
+            serialCommandQueue.Enqueue(command);
+        }
+
+        private void EnsureArduinoUnityScale()
+        {
+            SendCommand("S_T1_1.0");
+            SendCommand("S_Q1_1.0");
+            SendCommand("S_T2_1.0");
+            SendCommand("S_Q2_1.0");
+        }
+
+        private void ParseCalWeightsFromUI(bool formatBoxes)
+        {
+            if (TxtCalWeight1 == null || TxtCalWeight2 == null || TxtCalWeight3 == null) return;
+
+            double[] defaults = { 176.0, 402.06, 1000.0 };
+            TextBox[] boxes = { TxtCalWeight1, TxtCalWeight2, TxtCalWeight3 };
+
+            for (int i = 0; i < 3; i++)
             {
-                if (arduinoPort != null && arduinoPort.IsOpen)
+                string rawText = boxes[i].Text.Trim().Replace(',', '.');
+                if (double.TryParse(rawText, NumberStyles.Float, CultureInfo.InvariantCulture, out double val) && val > 0.1 && val <= 50000.0)
                 {
-                    arduinoPort.Write(command + "\n");
+                    calWeightsGrams[i] = val;
+                    if (formatBoxes)
+                    {
+                        boxes[i].Text = val.ToString("G6", CultureInfo.InvariantCulture);
+                    }
                 }
-            }
-            catch
-            {
-                if (arduinoPort != null && arduinoPort.IsOpen)
+                else if (formatBoxes)
                 {
-                    try { arduinoPort.Close(); } catch { }
+                    calWeightsGrams[i] = defaults[i];
+                    boxes[i].Text = defaults[i].ToString("G6", CultureInfo.InvariantCulture);
                 }
-                
-                ChkActivateSingle.IsChecked = false;
-                ChkActivateCRP.IsChecked = false;
-                if (isAutoRunning) StopAutoTest();
-                targetThrottle1 = 0;
-                targetThrottle2 = 0;
-                StopRecording();
             }
         }
 
-        private void LoadLatestCalibration()
+        private void UpdateTargetWeightLabels(bool formatBoxes)
+        {
+            if (TxtCalTargetThrust == null || TxtCalTargetTorque == null) return;
+            ParseCalWeightsFromUI(formatBoxes);
+
+            double t1 = (calWeightsGrams[0] / 1000.0) * GRAVITY;
+            double t2 = (calWeightsGrams[1] / 1000.0) * GRAVITY;
+            double t3 = (calWeightsGrams[2] / 1000.0) * GRAVITY;
+
+            double q1 = t1 * TORQUE_ARM_M;
+            double q2 = t2 * TORQUE_ARM_M;
+            double q3 = t3 * TORQUE_ARM_M;
+
+            TxtCalTargetThrust.Text = $"Target Thrusts: {t1:F3} N / {t2:F3} N / {t3:F3} N";
+            TxtCalTargetTorque.Text = $"Target Torques: {q1:F4} Nm / {q2:F4} Nm / {q3:F4} Nm";
+        }
+
+        private void TxtCalWeight_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            UpdateTargetWeightLabels(formatBoxes: false);
+        }
+
+        private void TxtCalWeight_LostFocus(object sender, RoutedEventArgs e)
+        {
+            UpdateTargetWeightLabels(formatBoxes: true);
+        }
+
+        private void TxtCalWeight_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter || e.Key == Key.Return)
+            {
+                UpdateTargetWeightLabels(formatBoxes: true);
+                Keyboard.ClearFocus();
+                FocusManager.SetFocusedElement(this, this);
+                e.Handled = true;
+            }
+        }
+
+        private void CmbCalMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (BtnStartCal == null || BtnFinishCal == null) return;
+            bool isCrpMode = CmbCalMode.SelectedIndex == 1;
+
+            BtnStartCal.Content = isCrpMode ? "Start CRP Calibration" : "Start Single Calibration";
+            BtnFinishCal.Content = isCrpMode ? "Finish & Save CRP Calibration" : "Finish & Save Single Calibration";
+
+            if (PanelCalBackThrust != null) PanelCalBackThrust.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+            if (PanelCalBackTorque != null) PanelCalBackTorque.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+            if (PanelGuideCRP != null) PanelGuideCRP.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+            if (PanelGuideSingle != null) PanelGuideSingle.Visibility = isCrpMode ? Visibility.Collapsed : Visibility.Visible;
+
+            if (TabCalibration != null && TabCalibration.IsSelected)
+            {
+                PanelBackDataInputs.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+                PanelBackDataDerived.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+                UpdateHeaderCenterAlignment();
+            }
+
+            if (!isCalibrating) ApplyActiveCalibrationForCurrentTab();
+        }
+
+        private void ApplyActiveCalibrationForCurrentTab()
+        {
+            if (TabSingle.IsSelected)
+            {
+                activeSplineT1 = singleSplineT1;
+                activeSplineQ1 = singleSplineQ1;
+            }
+            else if (TabCRP.IsSelected)
+            {
+                activeSplineT1 = crpSplineT1;
+                activeSplineQ1 = crpSplineQ1;
+                activeSplineT2 = crpSplineT2;
+                activeSplineQ2 = crpSplineQ2;
+            }
+            else if (TabCalibration.IsSelected && !isCalibrating)
+            {
+                bool isCrpMode = CmbCalMode != null && CmbCalMode.SelectedIndex == 1;
+                activeSplineT1 = isCrpMode ? crpSplineT1 : singleSplineT1;
+                activeSplineQ1 = isCrpMode ? crpSplineQ1 : singleSplineQ1;
+                activeSplineT2 = crpSplineT2;
+                activeSplineQ2 = crpSplineQ2;
+            }
+        }
+
+        private void LoadLatestCalibrationFromDisk()
         {
             try
             {
-                // 1. Load latest Front calibration (T1 and Q1)
                 var latestSingle = Directory.GetFiles(calSingleDir, "Calibration_*.csv")
-                                            .OrderByDescending(f => f)
+                                            .OrderByDescending(f => new FileInfo(f).LastWriteTime)
                                             .FirstOrDefault();
                 if (latestSingle != null)
                 {
                     string[] lines = File.ReadAllLines(latestSingle);
                     if (lines.Length > 1)
                     {
-                        string[] parts = lines[1].Split(',');
-                        if (parts.Length >= 2)
+                        string[] p = lines[1].Split(',');
+                        if (p.Length >= 9)
                         {
-                            scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
-                            scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                            double w1 = double.Parse(p[0], CultureInfo.InvariantCulture);
+                            double w2 = double.Parse(p[1], CultureInfo.InvariantCulture);
+                            double w3 = double.Parse(p[2], CultureInfo.InvariantCulture);
+
+                            singleSplineT1.LoadFromCsvRow(
+                                w1, w2, w3,
+                                double.Parse(p[3], CultureInfo.InvariantCulture),
+                                double.Parse(p[4], CultureInfo.InvariantCulture),
+                                double.Parse(p[5], CultureInfo.InvariantCulture),
+                                isTorque: false);
+
+                            singleSplineQ1.LoadFromCsvRow(
+                                w1, w2, w3,
+                                double.Parse(p[6], CultureInfo.InvariantCulture),
+                                double.Parse(p[7], CultureInfo.InvariantCulture),
+                                double.Parse(p[8], CultureInfo.InvariantCulture),
+                                isTorque: true);
+                        }
+                        else if (p.Length >= 2)
+                        {
+                            singleSplineT1.LoadLegacySingleScale(double.Parse(p[0], CultureInfo.InvariantCulture), isTorque: false);
+                            singleSplineQ1.LoadLegacySingleScale(double.Parse(p[1], CultureInfo.InvariantCulture), isTorque: true);
                         }
                     }
                 }
 
-                // 2. Load latest Back calibration (T2 and Q2)
                 var latestCRP = Directory.GetFiles(calCRPDir, "Calibration_*.csv")
-                                         .OrderByDescending(f => f)
+                                         .OrderByDescending(f => new FileInfo(f).LastWriteTime)
                                          .FirstOrDefault();
                 if (latestCRP != null)
                 {
                     string[] lines = File.ReadAllLines(latestCRP);
                     if (lines.Length > 1)
                     {
-                        string[] parts = lines[1].Split(',');
-                        if (parts.Length >= 4)
+                        string[] p = lines[1].Split(',');
+                        if (p.Length >= 15)
                         {
-                            scaleT2 = double.Parse(parts[2], CultureInfo.InvariantCulture);
-                            scaleQ2 = double.Parse(parts[3], CultureInfo.InvariantCulture);
-                            
-                            // If on CRP tab, use front scales from CRP file as well
-                            if (TabCRP.IsSelected)
+                            double w1 = double.Parse(p[0], CultureInfo.InvariantCulture);
+                            double w2 = double.Parse(p[1], CultureInfo.InvariantCulture);
+                            double w3 = double.Parse(p[2], CultureInfo.InvariantCulture);
+
+                            calWeightsGrams[0] = w1;
+                            calWeightsGrams[1] = w2;
+                            calWeightsGrams[2] = w3;
+
+                            if (TxtCalWeight1 != null)
                             {
-                                scaleT1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
-                                scaleQ1 = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                                TxtCalWeight1.Text = w1.ToString("G6", CultureInfo.InvariantCulture);
+                                TxtCalWeight2.Text = w2.ToString("G6", CultureInfo.InvariantCulture);
+                                TxtCalWeight3.Text = w3.ToString("G6", CultureInfo.InvariantCulture);
+                                UpdateTargetWeightLabels(formatBoxes: false);
                             }
+
+                            crpSplineT1.LoadFromCsvRow(
+                                w1, w2, w3,
+                                double.Parse(p[3], CultureInfo.InvariantCulture),
+                                double.Parse(p[4], CultureInfo.InvariantCulture),
+                                double.Parse(p[5], CultureInfo.InvariantCulture),
+                                isTorque: false);
+
+                            crpSplineQ1.LoadFromCsvRow(
+                                w1, w2, w3,
+                                double.Parse(p[6], CultureInfo.InvariantCulture),
+                                double.Parse(p[7], CultureInfo.InvariantCulture),
+                                double.Parse(p[8], CultureInfo.InvariantCulture),
+                                isTorque: true);
+
+                            crpSplineT2.LoadFromCsvRow(
+                                w1, w2, w3,
+                                double.Parse(p[9], CultureInfo.InvariantCulture),
+                                double.Parse(p[10], CultureInfo.InvariantCulture),
+                                double.Parse(p[11], CultureInfo.InvariantCulture),
+                                isTorque: false);
+
+                            crpSplineQ2.LoadFromCsvRow(
+                                w1, w2, w3,
+                                double.Parse(p[12], CultureInfo.InvariantCulture),
+                                double.Parse(p[13], CultureInfo.InvariantCulture),
+                                double.Parse(p[14], CultureInfo.InvariantCulture),
+                                isTorque: true);
+                        }
+                        else if (p.Length >= 4)
+                        {
+                            crpSplineT1.LoadLegacySingleScale(double.Parse(p[0], CultureInfo.InvariantCulture), isTorque: false);
+                            crpSplineQ1.LoadLegacySingleScale(double.Parse(p[1], CultureInfo.InvariantCulture), isTorque: true);
+                            crpSplineT2.LoadLegacySingleScale(double.Parse(p[2], CultureInfo.InvariantCulture), isTorque: false);
+                            crpSplineQ2.LoadLegacySingleScale(double.Parse(p[3], CultureInfo.InvariantCulture), isTorque: true);
                         }
                     }
                 }
 
-                if (isSetupComplete)
-                {
-                    SendCalibrationToArduino();
-                }
+                ApplyActiveCalibrationForCurrentTab();
             }
             catch { }
         }
 
-        private void SaveCalibration()
+        private void SaveSingleCalibrationToDisk()
         {
             try
             {
-                string targetDir = TabSingle.IsSelected ? calSingleDir : calCRPDir;
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string calFile = Path.Combine(targetDir, $"Calibration_{timestamp}.csv");
+                string calFile = Path.Combine(calSingleDir, $"Calibration_{timestamp}_Single.csv");
                 
-                File.WriteAllText(calFile, "ScaleT1,ScaleQ1,ScaleT2,ScaleQ2\n");
-                File.AppendAllText(calFile, string.Format(CultureInfo.InvariantCulture, 
-                    "{0:G8},{1:G8},{2:G8},{3:G8}\n", scaleT1, scaleQ1, scaleT2, scaleQ2));
+                string header = "W1_g,W2_g,W3_g,RawT1_1,RawT1_2,RawT1_3,RawQ1_1,RawQ1_2,RawQ1_3\n";
+                string data = string.Format(CultureInfo.InvariantCulture,
+                    "{0:G6},{1:G6},{2:G6},{3:G8},{4:G8},{5:G8},{6:G8},{7:G8},{8:G8}\n",
+                    calWeightsGrams[0], calWeightsGrams[1], calWeightsGrams[2],
+                    singleSplineT1.RawCounts[0], singleSplineT1.RawCounts[1], singleSplineT1.RawCounts[2],
+                    singleSplineQ1.RawCounts[0], singleSplineQ1.RawCounts[1], singleSplineQ1.RawCounts[2]);
+
+                File.WriteAllText(calFile, header + data);
             }
             catch { }
         }
 
-        private void SendCalibrationToArduino()
+        private void SaveCRPCalibrationToDisk()
         {
-            SendCommand($"S_T1_{scaleT1.ToString("G8", CultureInfo.InvariantCulture)}");
-            SendCommand($"S_Q1_{scaleQ1.ToString("G8", CultureInfo.InvariantCulture)}");
-            SendCommand($"S_T2_{scaleT2.ToString("G8", CultureInfo.InvariantCulture)}");
-            SendCommand($"S_Q2_{scaleQ2.ToString("G8", CultureInfo.InvariantCulture)}");
+            try
+            {
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string calFile = Path.Combine(calCRPDir, $"Calibration_{timestamp}_CRP.csv");
+                
+                string header = "W1_g,W2_g,W3_g,RawT1_1,RawT1_2,RawT1_3,RawQ1_1,RawQ1_2,RawQ1_3,RawT2_1,RawT2_2,RawT2_3,RawQ2_1,RawQ2_2,RawQ2_3\n";
+                string data = string.Format(CultureInfo.InvariantCulture,
+                    "{0:G6},{1:G6},{2:G6},{3:G8},{4:G8},{5:G8},{6:G8},{7:G8},{8:G8},{9:G8},{10:G8},{11:G8},{12:G8},{13:G8},{14:G8}\n",
+                    calWeightsGrams[0], calWeightsGrams[1], calWeightsGrams[2],
+                    crpSplineT1.RawCounts[0], crpSplineT1.RawCounts[1], crpSplineT1.RawCounts[2],
+                    crpSplineQ1.RawCounts[0], crpSplineQ1.RawCounts[1], crpSplineQ1.RawCounts[2],
+                    crpSplineT2.RawCounts[0], crpSplineT2.RawCounts[1], crpSplineT2.RawCounts[2],
+                    crpSplineQ2.RawCounts[0], crpSplineQ2.RawCounts[1], crpSplineQ2.RawCounts[2]);
+
+                File.WriteAllText(calFile, header + data);
+            }
+            catch { }
         }
 
         private void ResetGraphAxesY()
         {
-            double thrustMin = CmbThrustUnit.SelectedIndex == 0 ? -2.0 : -2.0 * 9.80665;
-            double thrustMax = CmbThrustUnit.SelectedIndex == 0 ? 5.0 : 5.0 * 9.80665;
+            double thrustMin = CmbThrustUnit.SelectedIndex == 0 ? -0.2 : -0.2 * GRAVITY;
+            double thrustMax = CmbThrustUnit.SelectedIndex == 0 ? 2.0 : 2.0 * GRAVITY;
 
             PlotFrontThrustSingle.Plot.Title("Front Thrust");
             PlotFrontThrustSingle.Plot.YLabel(CmbThrustUnit.SelectedIndex == 0 ? "Thrust (kgf)" : "Thrust (N)");
@@ -585,11 +1129,11 @@ namespace DynamometerGUI
 
             PlotFrontTorqueSingle.Plot.Title("Front Torque");
             PlotFrontTorqueSingle.Plot.YLabel("Torque (Nm)");
-            PlotFrontTorqueSingle.Plot.Axes.SetLimitsY(-0.2, 1.7);
+            PlotFrontTorqueSingle.Plot.Axes.SetLimitsY(-0.1, 1.0);
 
-            PlotFrontRPMSingle.Plot.Title("Front RPM");
-            PlotFrontRPMSingle.Plot.YLabel("RPM");
-            PlotFrontRPMSingle.Plot.Axes.SetLimitsY(-1000, 10000);
+            PlotFrontRPMSingle.Plot.Title("Front Rotational Speed");
+            PlotFrontRPMSingle.Plot.YLabel("Rotational Speed (RPM)");
+            PlotFrontRPMSingle.Plot.Axes.SetLimitsY(-400, 8000);
 
             PlotFrontThrustCRP.Plot.Title("Front Thrust");
             PlotFrontThrustCRP.Plot.YLabel(CmbThrustUnit.SelectedIndex == 0 ? "Thrust (kgf)" : "Thrust (N)");
@@ -597,11 +1141,11 @@ namespace DynamometerGUI
 
             PlotFrontTorqueCRP.Plot.Title("Front Torque");
             PlotFrontTorqueCRP.Plot.YLabel("Torque (Nm)");
-            PlotFrontTorqueCRP.Plot.Axes.SetLimitsY(-0.2, 1.7);
+            PlotFrontTorqueCRP.Plot.Axes.SetLimitsY(-0.1, 1.0);
 
-            PlotFrontRPMCRP.Plot.Title("Front RPM");
-            PlotFrontRPMCRP.Plot.YLabel("RPM");
-            PlotFrontRPMCRP.Plot.Axes.SetLimitsY(-1000, 10000);
+            PlotFrontRPMCRP.Plot.Title("Front Rotational Speed");
+            PlotFrontRPMCRP.Plot.YLabel("Rotational Speed (RPM)");
+            PlotFrontRPMCRP.Plot.Axes.SetLimitsY(-400, 8000);
 
             PlotBackThrustCRP.Plot.Title("Back Thrust");
             PlotBackThrustCRP.Plot.YLabel(CmbThrustUnit.SelectedIndex == 0 ? "Thrust (kgf)" : "Thrust (N)");
@@ -609,13 +1153,33 @@ namespace DynamometerGUI
 
             PlotBackTorqueCRP.Plot.Title("Back Torque");
             PlotBackTorqueCRP.Plot.YLabel("Torque (Nm)");
-            PlotBackTorqueCRP.Plot.Axes.SetLimitsY(-0.2, 1.7);
+            PlotBackTorqueCRP.Plot.Axes.SetLimitsY(-0.1, 1.0);
 
-            PlotBackRPMCRP.Plot.Title("Back RPM");
-            PlotBackRPMCRP.Plot.YLabel("RPM");
-            PlotBackRPMCRP.Plot.Axes.SetLimitsY(-1000, 10000);
+            PlotBackRPMCRP.Plot.Title("Back Rotational Speed");
+            PlotBackRPMCRP.Plot.YLabel("Rotational Speed (RPM)");
+            PlotBackRPMCRP.Plot.Axes.SetLimitsY(-400, 8000);
 
             RefreshVisiblePlots();
+        }
+
+        private void BtnResetGraphViews_Click(object sender, RoutedEventArgs e)
+        {
+            double minX = liveGraphTime < 15.0 ? 0 : liveGraphTime - 15.0;
+            double maxX = liveGraphTime < 15.0 ? 30.0 : liveGraphTime + 15.0;
+
+            var plots = new[]
+            {
+                PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle,
+                PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP,
+                PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP
+            };
+
+            foreach (var p in plots)
+            {
+                p.Plot.Axes.SetLimitsX(minX, maxX);
+            }
+
+            ResetGraphAxesY();
         }
 
         private void InitializeGraphAxes()
@@ -623,7 +1187,8 @@ namespace DynamometerGUI
             var plots = new[] 
             { 
                 PlotFrontThrustSingle, PlotFrontTorqueSingle, PlotFrontRPMSingle, 
-                PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP 
+                PlotFrontThrustCRP, PlotFrontTorqueCRP, PlotFrontRPMCRP,
+                PlotBackThrustCRP, PlotBackTorqueCRP, PlotBackRPMCRP
             };
 
             foreach (var p in plots)
@@ -692,8 +1257,8 @@ namespace DynamometerGUI
             targetThrottle1 = 0;
             targetThrottle2 = 0;
             
-            BtnStartAutoSingle.Content = "Start Auto Test";
-            BtnStartAutoCRP.Content = "Start Auto Test";
+            BtnStartAutoSingle.Content = "Start Automatic Test";
+            BtnStartAutoCRP.Content = "Start Automatic Test";
             
             if (LblRecordingAutoSingle != null) LblRecordingAutoSingle.Visibility = Visibility.Hidden;
             if (LblRecordingAutoCRP != null) LblRecordingAutoCRP.Visibility = Visibility.Hidden;
@@ -758,22 +1323,54 @@ namespace DynamometerGUI
 
             if (e.Source is TabControl && PanelLiveDataInputsRoot != null)
             {
-                if (TabLogs.IsSelected)
+                if (TabSingle.IsSelected)
+                {
+                    lastActiveTestTabIsCRP = false;
+                    PanelLiveDataInputsRoot.Visibility = Visibility.Visible;
+                    PanelLiveDataDerivedRoot.Visibility = Visibility.Visible;
+                    PanelBackDataInputs.Visibility = Visibility.Collapsed;
+                    PanelBackDataDerived.Visibility = Visibility.Collapsed;
+                    UpdateHeaderCenterAlignment();
+
+                    if (!isCalibrating && !isRecording && isSetupComplete)
+                    {
+                        ApplyActiveCalibrationForCurrentTab();
+                    }
+                }
+                else if (TabCRP.IsSelected)
+                {
+                    lastActiveTestTabIsCRP = true;
+                    PanelLiveDataInputsRoot.Visibility = Visibility.Visible;
+                    PanelLiveDataDerivedRoot.Visibility = Visibility.Visible;
+                    PanelBackDataInputs.Visibility = Visibility.Visible;
+                    PanelBackDataDerived.Visibility = Visibility.Visible;
+                    UpdateHeaderCenterAlignment();
+
+                    if (!isCalibrating && !isRecording && isSetupComplete)
+                    {
+                        ApplyActiveCalibrationForCurrentTab();
+                    }
+                }
+                else if (TabCalibration.IsSelected)
+                {
+                    if (!isCalibrating && CmbCalMode != null)
+                    {
+                        CmbCalMode.SelectedIndex = lastActiveTestTabIsCRP ? 1 : 0;
+                    }
+
+                    PanelLiveDataInputsRoot.Visibility = Visibility.Visible;
+                    PanelLiveDataDerivedRoot.Visibility = Visibility.Visible;
+                    bool isCrpMode = CmbCalMode != null && CmbCalMode.SelectedIndex == 1;
+                    PanelBackDataInputs.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+                    PanelBackDataDerived.Visibility = isCrpMode ? Visibility.Visible : Visibility.Collapsed;
+                    UpdateHeaderCenterAlignment();
+                    ApplyActiveCalibrationForCurrentTab();
+                }
+                else if (TabLogs.IsSelected)
                 {
                     PanelLiveDataInputsRoot.Visibility = Visibility.Hidden;
                     PanelLiveDataDerivedRoot.Visibility = Visibility.Hidden;
-                    LoadLogFiles(); // Automatically refresh recent CSV logs when opening the tab
-                }
-                else
-                {
-                    PanelLiveDataInputsRoot.Visibility = Visibility.Visible;
-                    PanelLiveDataDerivedRoot.Visibility = Visibility.Visible;
-                    
-                    bool isCRP = TabCRP.IsSelected;
-                    PanelBackDataInputs.Visibility = isCRP ? Visibility.Visible : Visibility.Collapsed;
-                    PanelBackDataDerived.Visibility = isCRP ? Visibility.Visible : Visibility.Collapsed;
-
-                    if (!isCalibrating && !isRecording && isSetupComplete) LoadLatestCalibration();
+                    LoadLogFiles();
                 }
             }
         }
@@ -795,27 +1392,66 @@ namespace DynamometerGUI
             if (ListLogFiles.SelectedItem == null) return;
             string file = Path.Combine(logDir, ListLogFiles.SelectedItem.ToString() ?? "");
             if (!File.Exists(file)) return;
-            string[] lines = File.ReadAllLines(file);
-            if (lines.Length == 0) return;
 
-            var dt = new DataTable();
-            string[] headers = lines[0].Split(',');
-            foreach (string header in headers) dt.Columns.Add(header);
-            for (int i = 1; i < lines.Length; i++)
+            int requestVersion = Interlocked.Increment(ref logLoadVersion);
+
+            Task.Run(() =>
             {
-                if (string.IsNullOrWhiteSpace(lines[i])) continue;
-                string[] parts = lines[i].Split(',');
-                
-                if (parts.Length > dt.Columns.Count) dt.Rows.Add(parts.Take(dt.Columns.Count).ToArray());
-                else if (parts.Length < dt.Columns.Count)
+                try
                 {
-                    var padded = parts.ToList();
-                    while (padded.Count < dt.Columns.Count) padded.Add("");
-                    dt.Rows.Add(padded.ToArray());
+                    var rows = new List<LogRow>(2048);
+                    using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536);
+                    using var reader = new StreamReader(stream);
+
+                    // Skip header line
+                    if (reader.ReadLine() == null) return;
+
+                    string? line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        string[] p = line.Split(',');
+                        if (p.Length < 11) continue;
+
+                        rows.Add(new LogRow
+                        {
+                            Time = p[0],
+                            Thrust1 = p[1],
+                            Torque1 = p[2],
+                            RPM1 = p[3],
+                            Voltage1 = p[4],
+                            Current1 = p[5],
+                            Throttle1 = p[6],
+                            ElecPower1 = p[7],
+                            MechPower1 = p[8],
+                            MotorEff1 = p[9],
+                            PropEff1 = p[10],
+                            Thrust2 = p.Length > 11 ? p[11] : "0",
+                            Torque2 = p.Length > 12 ? p[12] : "0",
+                            RPM2 = p.Length > 13 ? p[13] : "0",
+                            Voltage2 = p.Length > 14 ? p[14] : "0",
+                            Current2 = p.Length > 15 ? p[15] : "0",
+                            Throttle2 = p.Length > 16 ? p[16] : "0",
+                            ElecPower2 = p.Length > 17 ? p[17] : "0",
+                            MechPower2 = p.Length > 18 ? p[18] : "0",
+                            MotorEff2 = p.Length > 19 ? p[19] : "0",
+                            PropEff2 = p.Length > 20 ? p[20] : "0"
+                        });
+                    }
+
+                    if (requestVersion == logLoadVersion)
+                    {
+                        Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+                        {
+                            if (requestVersion == logLoadVersion)
+                            {
+                                DataGridLogs.ItemsSource = rows;
+                            }
+                        }));
+                    }
                 }
-                else dt.Rows.Add(parts);
-            }
-            DataGridLogs.ItemsSource = dt.DefaultView;
+                catch { }
+            });
         }
 
         private void BtnOpenLogsFolder_Click(object sender, RoutedEventArgs e)
@@ -823,123 +1459,178 @@ namespace DynamometerGUI
             Process.Start(new ProcessStartInfo { FileName = logDir, UseShellExecute = true });
         }
 
-        private void SetCalibrationButtonsState(bool enabled)
+        private void BtnOpenSingleCalFolder_Click(object sender, RoutedEventArgs e)
         {
-            BtnTareThrustFront1.IsEnabled = enabled;
-            BtnCalThrustFront1.IsEnabled = enabled;
-            BtnTareTorqueFront1.IsEnabled = enabled;
-            BtnCalTorqueFront1.IsEnabled = enabled;
-            
-            BtnTareThrustFront2.IsEnabled = enabled;
-            BtnCalThrustFront2.IsEnabled = enabled;
-            BtnTareThrustBack.IsEnabled = enabled;
-            BtnCalThrustBack.IsEnabled = enabled;
-            BtnTareTorqueFront2.IsEnabled = enabled;
-            BtnCalTorqueFront2.IsEnabled = enabled;
-            BtnTareTorqueBack.IsEnabled = enabled;
-            BtnCalTorqueBack.IsEnabled = enabled;
+            Process.Start(new ProcessStartInfo { FileName = calSingleDir, UseShellExecute = true });
+        }
 
+        private void BtnOpenCRPCalFolder_Click(object sender, RoutedEventArgs e)
+        {
+            Process.Start(new ProcessStartInfo { FileName = calCRPDir, UseShellExecute = true });
+        }
+
+        private void SetCalibrationButtonsState(bool calibrating)
+        {
             bool isSystemActive = (ChkActivateSingle.IsChecked == true || ChkActivateCRP.IsChecked == true);
+            bool isCrpMode = CmbCalMode.SelectedIndex == 1;
 
-            BtnStartCalSingle.IsEnabled = !enabled && !isSystemActive && isSetupComplete;
-            BtnFinishCalSingle.IsEnabled = enabled;
-            BtnStartCalCRP.IsEnabled = !enabled && !isSystemActive && isSetupComplete;
-            BtnFinishCalCRP.IsEnabled = enabled;
+            CmbCalMode.IsEnabled = !calibrating;
+            TxtCalWeight1.IsEnabled = !calibrating;
+            TxtCalWeight2.IsEnabled = !calibrating;
+            TxtCalWeight3.IsEnabled = !calibrating;
 
-            // Two-Way Interlock: Lock system activation while calibration is in progress
-            ChkActivateSingle.IsEnabled = !enabled && isSetupComplete;
-            ChkActivateCRP.IsEnabled = !enabled && isSetupComplete;
+            BtnTareThrustFront.IsEnabled = calibrating;
+            BtnCalThrustFrontW1.IsEnabled = calibrating;
+            BtnCalThrustFrontW2.IsEnabled = calibrating;
+            BtnCalThrustFrontW3.IsEnabled = calibrating;
 
-            TabSingle.IsEnabled = !enabled || TabSingle.IsSelected;
-            TabCRP.IsEnabled = !enabled || TabCRP.IsSelected;
-            TabLogs.IsEnabled = !enabled;
+            BtnTareTorqueFront.IsEnabled = calibrating;
+            BtnCalTorqueFrontW1.IsEnabled = calibrating;
+            BtnCalTorqueFrontW2.IsEnabled = calibrating;
+            BtnCalTorqueFrontW3.IsEnabled = calibrating;
+
+            bool enableBack = calibrating && isCrpMode;
+            BtnTareThrustBack.IsEnabled = enableBack;
+            BtnCalThrustBackW1.IsEnabled = enableBack;
+            BtnCalThrustBackW2.IsEnabled = enableBack;
+            BtnCalThrustBackW3.IsEnabled = enableBack;
+
+            BtnTareTorqueBack.IsEnabled = enableBack;
+            BtnCalTorqueBackW1.IsEnabled = enableBack;
+            BtnCalTorqueBackW2.IsEnabled = enableBack;
+            BtnCalTorqueBackW3.IsEnabled = enableBack;
+
+            BtnStartCal.IsEnabled = !calibrating && !isSystemActive && isSetupComplete;
+            BtnFinishCal.IsEnabled = calibrating;
+            BtnPostCalTareAll.IsEnabled = !calibrating && !isSystemActive && isSetupComplete;
+
+            // Lock other tabs and system activation while calibrating
+            TabSingle.IsEnabled = !calibrating;
+            TabCRP.IsEnabled = !calibrating;
+            TabLogs.IsEnabled = !calibrating;
+            ChkActivateSingle.IsEnabled = !calibrating && isSetupComplete;
+            ChkActivateCRP.IsEnabled = !calibrating && isSetupComplete;
         }
 
         private void BtnStartCal_Click(object sender, RoutedEventArgs e)
         {
+            UpdateTargetWeightLabels(formatBoxes: true);
+            EnsureArduinoUnityScale();
             isCalibrating = true;
+
+            bool isCrpMode = CmbCalMode.SelectedIndex == 1;
+            var t1Clone = (isCrpMode ? crpSplineT1 : singleSplineT1).Clone();
+            var q1Clone = (isCrpMode ? crpSplineQ1 : singleSplineQ1).Clone();
+            var t2Clone = crpSplineT2.Clone();
+            var q2Clone = crpSplineQ2.Clone();
+
+            t1Clone.ResetCaptureFlags();
+            q1Clone.ResetCaptureFlags();
+            t2Clone.ResetCaptureFlags();
+            q2Clone.ResetCaptureFlags();
+
+            t1Clone.SyncWeightsAndTargets(calWeightsGrams, isTorque: false);
+            q1Clone.SyncWeightsAndTargets(calWeightsGrams, isTorque: true);
+            t2Clone.SyncWeightsAndTargets(calWeightsGrams, isTorque: false);
+            q2Clone.SyncWeightsAndTargets(calWeightsGrams, isTorque: true);
+
+            activeSplineT1 = t1Clone;
+            activeSplineQ1 = q1Clone;
+            activeSplineT2 = t2Clone;
+            activeSplineQ2 = q2Clone;
+
             SetCalibrationButtonsState(true);
         }
 
         private void BtnFinishCal_Click(object sender, RoutedEventArgs e)
         {
+            bool isCrpMode = CmbCalMode.SelectedIndex == 1;
             isCalibrating = false;
             SetCalibrationButtonsState(false);
-            SaveCalibration();
-            ResetGraphAxesY();
-            MessageBox.Show("Calibration complete. Axis limits restored.", "Calibration Saved");
-        }
 
-        public void BtnTareThrust_Click(object sender, RoutedEventArgs e) 
-        { 
-            SendCommand("A"); 
-        }
-
-        public void BtnCalThrust_Click(object sender, RoutedEventArgs e) 
-        { 
-            if (Math.Abs(thrust1) < 1e-5)
+            if (isCrpMode)
             {
-                MessageBox.Show("No load detected. Place the 176g weight on the motor mount before calibrating.", "Calibration Warning");
+                crpSplineT1 = activeSplineT1.Clone();
+                crpSplineQ1 = activeSplineQ1.Clone();
+                crpSplineT2 = activeSplineT2.Clone();
+                crpSplineQ2 = activeSplineQ2.Clone();
+                SaveCRPCalibrationToDisk();
+                ResetGraphAxesY();
+                MessageBox.Show(
+                    "CRP 3-Point Spline Calibration saved to DynoCalibrationsCRP.\n\n" +
+                    "Remove all calibration attachments, mount your motors and propellers, and click 'Tare All Load Cells' to zero any mechanical hysteresis before testing.",
+                    "CRP Calibration Saved");
+            }
+            else
+            {
+                singleSplineT1 = activeSplineT1.Clone();
+                singleSplineQ1 = activeSplineQ1.Clone();
+                SaveSingleCalibrationToDisk();
+                ResetGraphAxesY();
+                MessageBox.Show(
+                    "Single Propeller 3-Point Spline Calibration saved to DynoCalibrationsSingle.\n\n" +
+                    "Remove all calibration attachments, mount your motor and propeller, and click 'Tare All Load Cells' to zero any mechanical hysteresis before testing.",
+                    "Single Calibration Saved");
+            }
+        }
+
+        private void CalibratePoint(SplineCalibrator spline, int weightIndex, double currentRawValue, double factorPerKg, string channelName)
+        {
+            UpdateTargetWeightLabels(formatBoxes: true);
+            if (Math.Abs(currentRawValue) < 1e-5)
+            {
+                MessageBox.Show($"No load detected on {channelName}. Attach the {calWeightsGrams[weightIndex]:G6} g weight before clicking this button.", "Calibration Warning");
                 return;
             }
-            scaleT1 = (TARGET_THRUST_N * scaleT1) / thrust1;
-            SendCommand($"S_T1_{scaleT1.ToString("G8", CultureInfo.InvariantCulture)}");
-            SaveCalibration();
-            MessageBox.Show($"Front Thrust calibrated to {TARGET_THRUST_N:F3} N ({0.176:F3} kgf).\nScale Factor: {scaleT1:G6}", "Calibration Saved");
+
+            double weightG = calWeightsGrams[weightIndex];
+            double targetPhysical = (weightG / 1000.0) * factorPerKg;
+            spline.SetPoint(weightIndex, weightG, currentRawValue, targetPhysical);
         }
 
-        public void BtnTareTorque_Click(object sender, RoutedEventArgs e) 
-        { 
-            SendCommand("C"); 
+        // Front Thrust Calibration Handlers
+        public void BtnTareThrust_Click(object sender, RoutedEventArgs e) => SendCommand("A");
+        private void BtnCalThrustFrontW1_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineT1, 0, rawThrust1, GRAVITY, "Front Thrust");
+        private void BtnCalThrustFrontW2_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineT1, 1, rawThrust1, GRAVITY, "Front Thrust");
+        private void BtnCalThrustFrontW3_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineT1, 2, rawThrust1, GRAVITY, "Front Thrust");
+
+        // Back Thrust Calibration Handlers
+        public void BtnTareThrustBack_Click(object sender, RoutedEventArgs e) => SendCommand("E");
+        private void BtnCalThrustBackW1_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineT2, 0, rawThrust2, GRAVITY, "Back Thrust");
+        private void BtnCalThrustBackW2_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineT2, 1, rawThrust2, GRAVITY, "Back Thrust");
+        private void BtnCalThrustBackW3_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineT2, 2, rawThrust2, GRAVITY, "Back Thrust");
+
+        // Front Torque Calibration Handlers
+        public void BtnTareTorque_Click(object sender, RoutedEventArgs e) => SendCommand("C");
+        private void BtnCalTorqueFrontW1_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineQ1, 0, rawTorque1, GRAVITY * TORQUE_ARM_M, "Front Torque");
+        private void BtnCalTorqueFrontW2_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineQ1, 1, rawTorque1, GRAVITY * TORQUE_ARM_M, "Front Torque");
+        private void BtnCalTorqueFrontW3_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineQ1, 2, rawTorque1, GRAVITY * TORQUE_ARM_M, "Front Torque");
+
+        // Back Torque Calibration Handlers
+        public void BtnTareTorqueBack_Click(object sender, RoutedEventArgs e) => SendCommand("G");
+        private void BtnCalTorqueBackW1_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineQ2, 0, rawTorque2, GRAVITY * TORQUE_ARM_M, "Back Torque");
+        private void BtnCalTorqueBackW2_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineQ2, 1, rawTorque2, GRAVITY * TORQUE_ARM_M, "Back Torque");
+        private void BtnCalTorqueBackW3_Click(object sender, RoutedEventArgs e) => CalibratePoint(activeSplineQ2, 2, rawTorque2, GRAVITY * TORQUE_ARM_M, "Back Torque");
+
+        // Tare All Load Cells Handlers
+        private void TareAllChannelsHardware()
+        {
+            SendCommand("Z");
         }
 
-        public void BtnCalTorque_Click(object sender, RoutedEventArgs e) 
-        { 
-            if (Math.Abs(torque1) < 1e-5)
-            {
-                MessageBox.Show("No load detected. Place the 176g weight on the torque arm before calibrating.", "Calibration Warning");
-                return;
-            }
-            scaleQ1 = (TARGET_TORQUE_NM * scaleQ1) / torque1;
-            SendCommand($"S_Q1_{scaleQ1.ToString("G8", CultureInfo.InvariantCulture)}");
-            SaveCalibration();
-            MessageBox.Show($"Front Torque calibrated to {TARGET_TORQUE_NM:F4} Nm.\nScale Factor: {scaleQ1:G6}", "Calibration Saved");
+        private void BtnPostCalTareAll_Click(object sender, RoutedEventArgs e)
+        {
+            TareAllChannelsHardware();
         }
 
-        public void BtnTareThrustBack_Click(object sender, RoutedEventArgs e) 
-        { 
-            SendCommand("E"); 
+        private void BtnTareSingleTab_Click(object sender, RoutedEventArgs e)
+        {
+            TareAllChannelsHardware();
         }
 
-        public void BtnCalThrustBack_Click(object sender, RoutedEventArgs e) 
-        { 
-            if (Math.Abs(thrust2) < 1e-5)
-            {
-                MessageBox.Show("No load detected. Place the 176g weight on the back mount before calibrating.", "Calibration Warning");
-                return;
-            }
-            scaleT2 = (TARGET_THRUST_N * scaleT2) / thrust2;
-            SendCommand($"S_T2_{scaleT2.ToString("G8", CultureInfo.InvariantCulture)}");
-            SaveCalibration();
-            MessageBox.Show($"Back Thrust calibrated to {TARGET_THRUST_N:F3} N.\nScale Factor: {scaleT2:G6}", "Calibration Saved");
-        }
-
-        public void BtnTareTorqueBack_Click(object sender, RoutedEventArgs e) 
-        { 
-            SendCommand("G"); 
-        }
-
-        public void BtnCalTorqueBack_Click(object sender, RoutedEventArgs e) 
-        { 
-            if (Math.Abs(torque2) < 1e-5)
-            {
-                MessageBox.Show("No load detected. Place the 176g weight on the back torque arm before calibrating.", "Calibration Warning");
-                return;
-            }
-            scaleQ2 = (TARGET_TORQUE_NM * scaleQ2) / torque2;
-            SendCommand($"S_Q2_{scaleQ2.ToString("G8", CultureInfo.InvariantCulture)}");
-            SaveCalibration();
-            MessageBox.Show($"Back Torque calibrated to {TARGET_TORQUE_NM:F4} Nm.\nScale Factor: {scaleQ2:G6}", "Calibration Saved");
+        private void BtnTareCRPTab_Click(object sender, RoutedEventArgs e)
+        {
+            TareAllChannelsHardware();
         }
 
         private void ChkActivateSingle_Checked(object sender, RoutedEventArgs e)
@@ -947,11 +1638,14 @@ namespace DynamometerGUI
             SldThrottleSingle.IsEnabled = true;
             BtnRecordSingle.IsEnabled = true;
             BtnStartAutoSingle.IsEnabled = true;
-            TabCRP.IsEnabled = false; 
+            BtnTareSingleTab.IsEnabled = false;
+
+            TabCRP.IsEnabled = false;
+            TabCalibration.IsEnabled = false;
             TabLogs.IsEnabled = false;
 
-            BtnStartCalSingle.IsEnabled = false;
-            BtnStartCalCRP.IsEnabled = false;
+            BtnStartCal.IsEnabled = false;
+            BtnPostCalTareAll.IsEnabled = false;
 
             SendCommand("UNLOCK_SINGLE");
         }
@@ -962,13 +1656,16 @@ namespace DynamometerGUI
             SldThrottleSingle.Value = 0; 
             BtnRecordSingle.IsEnabled = false;
             BtnStartAutoSingle.IsEnabled = false;
-            TabCRP.IsEnabled = true; 
+            BtnTareSingleTab.IsEnabled = isSetupComplete;
+
+            TabCRP.IsEnabled = true;
+            TabCalibration.IsEnabled = true;
             TabLogs.IsEnabled = true;
 
             if (!isCalibrating && isSetupComplete)
             {
-                BtnStartCalSingle.IsEnabled = true;
-                BtnStartCalCRP.IsEnabled = true;
+                BtnStartCal.IsEnabled = true;
+                BtnPostCalTareAll.IsEnabled = true;
             }
 
             StopRecording();
@@ -981,11 +1678,14 @@ namespace DynamometerGUI
             SldThrottleBackCRP.IsEnabled = true;
             BtnRecordCRP.IsEnabled = true;
             BtnStartAutoCRP.IsEnabled = true;
+            BtnTareCRPTab.IsEnabled = false;
+
             TabSingle.IsEnabled = false;
+            TabCalibration.IsEnabled = false;
             TabLogs.IsEnabled = false;
 
-            BtnStartCalSingle.IsEnabled = false;
-            BtnStartCalCRP.IsEnabled = false;
+            BtnStartCal.IsEnabled = false;
+            BtnPostCalTareAll.IsEnabled = false;
 
             SendCommand("UNLOCK_CRP");
         }
@@ -998,13 +1698,16 @@ namespace DynamometerGUI
             SldThrottleBackCRP.Value = 0;
             BtnRecordCRP.IsEnabled = false;
             BtnStartAutoCRP.IsEnabled = false;
-            TabSingle.IsEnabled = true; 
+            BtnTareCRPTab.IsEnabled = isSetupComplete;
+
+            TabSingle.IsEnabled = true;
+            TabCalibration.IsEnabled = true;
             TabLogs.IsEnabled = true;
 
             if (!isCalibrating && isSetupComplete)
             {
-                BtnStartCalSingle.IsEnabled = true;
-                BtnStartCalCRP.IsEnabled = true;
+                BtnStartCal.IsEnabled = true;
+                BtnPostCalTareAll.IsEnabled = true;
             }
 
             StopRecording();
@@ -1037,7 +1740,6 @@ namespace DynamometerGUI
                 string mode = isAutoRunning ? "Auto" : "Manual";
                 string filePath = Path.Combine(logDir, $"DynamometerData_{timestamp}_{mode}.csv");
 
-                // Offload disk file creation to prevent stalling the UI dispatch loop
                 Task.Run(() =>
                 {
                     try
@@ -1054,10 +1756,7 @@ namespace DynamometerGUI
                             isRecording = true;
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine("File creation error: " + ex.Message);
-                    }
+                    catch { }
                 });
                 
                 if (isAutoRunning)
@@ -1076,30 +1775,37 @@ namespace DynamometerGUI
             else StopRecording();
         }
 
-        private void CmbTheme_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        private static SolidColorBrush CreateFrozenBrush(string hex)
+        {
+            var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+            brush.Freeze();
+            return brush;
+        }
+
+        private void CmbTheme_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (PlotFrontThrustSingle == null) return;
             bool isDark = CmbTheme.SelectedIndex == 1;
 
             if (isDark)
             {
-                this.Resources["MainBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1E1E1E"));
-                this.Resources["MainFg"] = new SolidColorBrush(Colors.White);
-                this.Resources["BtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E3E42"));
-                this.Resources["HoverBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#555555"));
-                this.Resources["DisabledBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2D2D30"));
-                this.Resources["ControlBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2D2D30"));
-                if (ImgLogo != null) try { ImgLogo.Source = new BitmapImage(new Uri("pack://application:,,,/Dynamometer Logo NoText DarkMode NoBackground.png")); } catch { }
+                this.Resources["MainBg"] = BrushDarkMainBg;
+                this.Resources["MainFg"] = BrushDarkMainFg;
+                this.Resources["BtnBg"] = BrushDarkBtnBg;
+                this.Resources["HoverBtnBg"] = BrushDarkHoverBtnBg;
+                this.Resources["DisabledBtnBg"] = BrushDarkDisabledBtnBg;
+                this.Resources["ControlBg"] = BrushDarkControlBg;
+                if (ImgLogo != null && logoDark != null) ImgLogo.Source = logoDark;
             }
             else
             {
-                this.Resources["MainBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#edf0f4"));
-                this.Resources["MainFg"] = new SolidColorBrush(Colors.Black);
-                this.Resources["BtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D0D9E4"));
-                this.Resources["HoverBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B8C5D1"));
-                this.Resources["DisabledBtnBg"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#cccccc"));
-                this.Resources["ControlBg"] = new SolidColorBrush(Colors.White);
-                if (ImgLogo != null) try { ImgLogo.Source = new BitmapImage(new Uri("pack://application:,,,/Dynamometer Logo NoText NoBackground.png")); } catch { }
+                this.Resources["MainBg"] = BrushLightMainBg;
+                this.Resources["MainFg"] = BrushLightMainFg;
+                this.Resources["BtnBg"] = BrushLightBtnBg;
+                this.Resources["HoverBtnBg"] = BrushLightHoverBtnBg;
+                this.Resources["DisabledBtnBg"] = BrushLightDisabledBtnBg;
+                this.Resources["ControlBg"] = BrushLightControlBg;
+                if (ImgLogo != null && logoLight != null) ImgLogo.Source = logoLight;
             }
 
             SetPlotTheme(isDark);
@@ -1117,32 +1823,28 @@ namespace DynamometerGUI
                 var l = loggers[i];
                 if (isDark)
                 {
-                    p.Plot.FigureBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
-                    p.Plot.DataBackground.Color = ScottPlot.Color.FromHex("#1E1E1E");
-                    p.Plot.Axes.Color(ScottPlot.Color.FromHex("#FFFFFF"));
-                    p.Plot.Grid.MajorLineColor = ScottPlot.Color.FromHex("#444444");
-                    if (l != null) l.Color = ScottPlot.Color.FromHex("#FFC107"); 
+                    p.Plot.FigureBackground.Color = SpDarkBg;
+                    p.Plot.DataBackground.Color = SpDarkBg;
+                    p.Plot.Axes.Color(SpDarkFg);
+                    p.Plot.Grid.MajorLineColor = SpDarkGrid;
+                    if (l != null) l.Color = SpDarkLine; 
                 }
                 else
                 {
-                    p.Plot.FigureBackground.Color = ScottPlot.Color.FromHex("#edf0f4");
+                    p.Plot.FigureBackground.Color = SpLightBg;
                     p.Plot.DataBackground.Color = ScottPlot.Colors.White;
                     p.Plot.Axes.Color(ScottPlot.Colors.Black);
-                    p.Plot.Grid.MajorLineColor = ScottPlot.Color.FromHex("#DDDDDD");
+                    p.Plot.Grid.MajorLineColor = SpLightGrid;
                     if (l != null) l.Color = ScottPlot.Colors.Blue;
                 }
             }
             RefreshVisiblePlots();
         }
 
-        private void CmbThrustUnit_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        private void CmbThrustUnit_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (PlotFrontThrustSingle == null) return; 
-            string unitLabel = CmbThrustUnit.SelectedIndex == 0 ? "Thrust (kgf)" : "Thrust (N)";
-            PlotFrontThrustSingle.Plot.YLabel(unitLabel);
-            PlotFrontThrustCRP.Plot.YLabel(unitLabel);
-            PlotBackThrustCRP.Plot.YLabel(unitLabel);
-            RefreshVisiblePlots();
+            if (PlotFrontThrustSingle == null) return;
+            ResetGraphAxesY();
         }
 
         private void RefreshVisiblePlots()
@@ -1192,16 +1894,16 @@ namespace DynamometerGUI
 
         private void BtnResetAutoSingle_Click(object sender, RoutedEventArgs e)
         {
-            SldAutoStepsSingle.Value = 5;
-            TxtStepDurationSingle.Text = "2.0";
+            SldAutoStepsSingle.Value = 6;
+            TxtStepDurationSingle.Text = "10.0";
             TxtAutoSingle1.Text = "10"; TxtAutoSingle2.Text = "20"; TxtAutoSingle3.Text = "30"; 
             TxtAutoSingle4.Text = "40"; TxtAutoSingle5.Text = "50"; TxtAutoSingle6.Text = "60";
         }
 
         private void BtnResetAutoCRP_Click(object sender, RoutedEventArgs e)
         {
-            SldAutoStepsCRP.Value = 5;
-            TxtStepDurationCRP.Text = "2.0";
+            SldAutoStepsCRP.Value = 6;
+            TxtStepDurationCRP.Text = "10.0";
             TxtAutoFrontCRP1.Text = "10"; TxtAutoFrontCRP2.Text = "20"; TxtAutoFrontCRP3.Text = "30"; 
             TxtAutoFrontCRP4.Text = "40"; TxtAutoFrontCRP5.Text = "50"; TxtAutoFrontCRP6.Text = "60";
             
@@ -1221,7 +1923,7 @@ namespace DynamometerGUI
                 }
                 else
                 {
-                    txt.Text = "2.0";
+                    txt.Text = "10.0";
                 }
             }
         }

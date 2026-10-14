@@ -5,6 +5,7 @@
         Name="WindowMain" Title="Dynamometer Control Panel" Height="850" Width="1250"
         WindowState="Maximized"
         PreviewKeyDown="Window_PreviewKeyDown" PreviewKeyUp="Window_PreviewKeyUp"
+        PreviewMouseDown="Window_PreviewMouseDown"
         Loaded="Window_Loaded">
     <Window.Resources>
         <SolidColorBrush x:Key="MainBg" Color="#edf0f4" />
@@ -151,23 +152,37 @@
         </Style>
         
         <Style TargetType="DataGrid">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="Black"/> 
+            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
+            <Setter Property="RowBackground" Value="{DynamicResource ControlBg}"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="Gray"/>
+            <Setter Property="VerticalGridLinesBrush" Value="Gray"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{DynamicResource BtnBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MainFg}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="BorderBrush" Value="Gray"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
         </Style>
     </Window.Resources>
 
     <DockPanel Margin="5">
-        <Grid DockPanel.Dock="Top" Margin="0">
+        <Grid Name="HeaderGrid" DockPanel.Dock="Top" Margin="0" SizeChanged="HeaderGrid_SizeChanged">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Name="ColLeftCenterSpacer" Width="0"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <!-- Logo & Title -->
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,20,0" VerticalAlignment="Top">
+            <StackPanel Name="PanelLogoTitle" Grid.Column="0" Orientation="Horizontal" Margin="0,0,20,0" VerticalAlignment="Top">
                 <TextBlock Text="BLDC MOTOR&#x0a;&amp; PROPELLER&#x0a;DYNAMOMETER" 
                            FontWeight="Bold" FontSize="18" VerticalAlignment="Center" 
                            TextAlignment="Right" Margin="0,0,10,0"/>
@@ -175,7 +190,7 @@
             </StackPanel>
 
             <!-- Emergency Stop Section -->
-            <StackPanel Grid.Column="1" VerticalAlignment="Top" Margin="10,5,20,0" HorizontalAlignment="Center">
+            <StackPanel Name="PanelEmergencyStop" Grid.Column="1" VerticalAlignment="Top" Margin="10,5,20,0" HorizontalAlignment="Center">
                 <Button Name="BtnEmergencyStop" Width="100" Height="100" 
                         PreviewMouseDown="BtnStop_MouseDown" PreviewMouseUp="BtnStop_MouseUp" MouseLeave="BtnStop_MouseLeave"
                         Style="{x:Null}" Focusable="False" FocusVisualStyle="{x:Null}">
@@ -197,13 +212,13 @@
                 <TextBlock Name="TxtStopCountdown" Text="3.0" Foreground="Red" FontWeight="Bold" FontSize="18" HorizontalAlignment="Center" Margin="0,2,0,0" Visibility="Hidden"/>
             </StackPanel>
 
-            <!-- Live Data: Inputs -->
-            <StackPanel Name="PanelLiveDataInputsRoot" Grid.Column="2" Orientation="Vertical" VerticalAlignment="Top" Margin="10,0,10,0">
+            <!-- Live Data: Inputs (Positioned immediately left of window center) -->
+            <StackPanel Name="PanelLiveDataInputsRoot" Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0,0,15,0">
                 <TextBlock Text="Live Data: Inputs" FontSize="20" FontWeight="Bold" Margin="0,0,0,5"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/>
-                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     
                     <StackPanel Grid.Column="0">
@@ -214,7 +229,7 @@
                         <TextBlock Name="TxtFrontRPM" Text="RPM: 0"/>
                     </StackPanel>
                     
-                    <StackPanel Grid.Column="1" Name="PanelBackDataInputs" Visibility="Collapsed">
+                    <StackPanel Grid.Column="1" Name="PanelBackDataInputs" Width="150" Visibility="Collapsed">
                         <TextBlock Text="Back Stand" FontWeight="SemiBold" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtBackVoltage" Text="Voltage: 0.00 V" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtBackCurrent" Text="Current: 0.00 A" Margin="0,0,0,2"/>
@@ -224,13 +239,13 @@
                 </Grid>
             </StackPanel>
 
-            <!-- Live Data: Derived -->
-            <StackPanel Name="PanelLiveDataDerivedRoot" Grid.Column="3" Orientation="Vertical" VerticalAlignment="Top" Margin="0">
+            <!-- Live Data: Derived (Positioned immediately right of window center) -->
+            <StackPanel Name="PanelLiveDataDerivedRoot" Grid.Column="4" Orientation="Vertical" VerticalAlignment="Top" Margin="15,0,0,0">
                 <TextBlock Text="Live Data: Derived" FontSize="20" FontWeight="Bold" Margin="0,0,0,5"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/>
-                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     
                     <StackPanel Grid.Column="0">
@@ -241,7 +256,7 @@
                         <TextBlock Name="TxtFrontPropEff" Text="Prop Eff: 0.000 N/W" Margin="0,0,0,2"/>
                     </StackPanel>
                     
-                    <StackPanel Grid.Column="1" Name="PanelBackDataDerived" Visibility="Collapsed">
+                    <StackPanel Grid.Column="1" Name="PanelBackDataDerived" Width="150" Visibility="Collapsed">
                         <TextBlock Text="Back Stand" FontWeight="SemiBold" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtBackElecPower" Text="Elec Power: 0.00 W" Margin="0,0,0,2"/>
                         <TextBlock Name="TxtBackMechPower" Text="Mech Power: 0.00 W" Margin="0,0,0,2"/>
@@ -252,7 +267,7 @@
             </StackPanel>
 
             <!-- Settings -->
-            <StackPanel Grid.Column="4" Orientation="Vertical" VerticalAlignment="Top" HorizontalAlignment="Right">
+            <StackPanel Grid.Column="6" Orientation="Vertical" VerticalAlignment="Top" HorizontalAlignment="Right">
                 <TextBlock Text="Theme:" FontWeight="Bold" FontSize="14" Margin="0,0,0,2"/>
                 <ComboBox Name="CmbTheme" Width="115" FontSize="14" HorizontalAlignment="Left" Margin="0,0,0,10" SelectionChanged="CmbTheme_SelectionChanged">
                     <ComboBoxItem Content="Light" IsSelected="True"/>
@@ -275,6 +290,8 @@
         </Border>
 
         <TabControl Name="MainTabControl" Background="Transparent" SelectionChanged="MainTabControl_SelectionChanged" Margin="0" Padding="0" BorderThickness="0,1,0,0" BorderBrush="Gray">
+            
+            <!-- 1. Single Propeller Tab -->
             <TabItem Name="TabSingle" Header="Single Propeller">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
@@ -284,22 +301,13 @@
                     
                     <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="10,0,15,0">
                         <StackPanel>
-                            <Button Name="BtnStartCalSingle" Content="Start Calibration" Height="30" Margin="0,0,0,10" Click="BtnStartCal_Click"/>
-
-                            <Button Name="BtnTareThrustFront1" Content="1. Tare Thrust" Height="30" Margin="0,0,0,5" IsEnabled="False" Click="BtnTareThrust_Click"/>
-                            <Button Name="BtnCalThrustFront1" Content="2. Calibrate Thrust" Height="30" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalThrust_Click"/>
-                            <Button Name="BtnTareTorqueFront1" Content="3. Tare Torque" Height="30" Margin="0,0,0,5" IsEnabled="False" Click="BtnTareTorque_Click"/>
-                            <Button Name="BtnCalTorqueFront1" Content="4. Calibrate Torque" Height="30" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalTorque_Click"/>
-                            
-                            <Button Name="BtnFinishCalSingle" Content="Finish Calibration" Height="30" Margin="0,0,0,15" IsEnabled="False" Click="BtnFinishCal_Click"/>
-
-                            <Separator Background="Gray" Margin="0,0,0,15"/>
-
                             <TextBlock Text="System Control" FontWeight="Bold" Margin="0,0,0,10"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <CheckBox Name="ChkActivateSingle" Content="Activate System" VerticalAlignment="Center" Checked="ChkActivateSingle_Checked" Unchecked="ChkActivateSingle_Unchecked"/>
                                 <TextBlock Name="TxtTimerSingle" Text="Time: 00:00:00.000" FontWeight="SemiBold" VerticalAlignment="Center" Margin="15,0,0,0"/>
                             </StackPanel>
+                            <Button Name="BtnTareSingleTab" Content="Tare All Load Cells" Height="25" Margin="0,0,0,6" IsEnabled="False" Click="BtnTareSingleTab_Click"/>
+                            <Button Name="BtnResetViewSingle" Content="Reset Graph Views" Height="25" Margin="0,0,0,10" Click="BtnResetGraphViews_Click"/>
 
                             <Separator Background="Gray" Margin="0,0,0,15"/>
 
@@ -320,12 +328,12 @@
                             <TextBlock Text="Automatic Control" FontWeight="Bold" Margin="0,0,0,10"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                 <TextBlock Text="Step Duration (s): " VerticalAlignment="Center"/>
-                                <TextBox Name="TxtStepDurationSingle" Text="2.0" Width="40" TextAlignment="Center" LostFocus="TxtStepDuration_LostFocus"/>
+                                <TextBox Name="TxtStepDurationSingle" Text="10.0" Width="40" TextAlignment="Center" LostFocus="TxtStepDuration_LostFocus"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <TextBlock Text="Number of Steps: " VerticalAlignment="Center"/>
-                                <Slider Name="SldAutoStepsSingle" Width="80" Minimum="2" Maximum="6" Value="5" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SldAutoStepsSingle_ValueChanged" VerticalAlignment="Center" Margin="5,0"/>
-                                <TextBlock Name="TxtAutoStepsSingle" Text="5" VerticalAlignment="Center" Width="20"/>
+                                <Slider Name="SldAutoStepsSingle" Width="80" Minimum="2" Maximum="6" Value="6" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SldAutoStepsSingle_ValueChanged" VerticalAlignment="Center" Margin="5,0"/>
+                                <TextBlock Name="TxtAutoStepsSingle" Text="6" VerticalAlignment="Center" Width="20"/>
                                 <Button Name="BtnResetAutoSingle" Content="Reset" Width="50" Height="22" Margin="10,0,0,0" Click="BtnResetAutoSingle_Click"/>
                             </StackPanel>
                             
@@ -336,7 +344,7 @@
                                 <TextBox Name="TxtAutoSingle3" Text="30" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoSingle4" Text="40" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoSingle5" Text="50" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
-                                <TextBox Name="TxtAutoSingle6" Text="60" Width="35" TextAlignment="Center" Visibility="Collapsed"/>
+                                <TextBox Name="TxtAutoSingle6" Text="60" Width="35" TextAlignment="Center" Visibility="Visible"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <Button Name="BtnStartAutoSingle" Content="Start Automatic Test" Height="30" Padding="10,0" IsEnabled="False" Click="BtnStartAutoSingle_Click"/>
@@ -358,43 +366,27 @@
                 </Grid>
             </TabItem>
 
+            <!-- 2. Contra Rotating Propellers Tab -->
             <TabItem Name="TabCRP" Header="Contra Rotating Propellers">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="340"/> 
+                        <ColumnDefinition Width="300"/> 
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
                     <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="10,0,15,0">
                         <StackPanel>
-                            <Button Name="BtnStartCalCRP" Content="Start Calibration" Height="30" Margin="0,0,0,10" Click="BtnStartCal_Click"/>
-
-                            <Button Name="BtnTareThrustFront2" Content="1. Tare Front Thrust" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareThrust_Click"/>
-                            <Button Name="BtnCalThrustFront2" Content="2. Calibrate Front Thrust" Height="25" Margin="0,0,0,8" IsEnabled="False" Click="BtnCalThrust_Click"/>
-                            
-                            <Button Name="BtnTareThrustBack" Content="3. Tare Back Thrust" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareThrustBack_Click"/>
-                            <Button Name="BtnCalThrustBack" Content="4. Calibrate Back Thrust" Height="25" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalThrustBack_Click"/>
-
-                            <Button Name="BtnTareTorqueFront2" Content="5. Tare Front Torque" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareTorque_Click"/>
-                            <Button Name="BtnCalTorqueFront2" Content="6. Calibrate Front Torque" Height="25" Margin="0,0,0,8" IsEnabled="False" Click="BtnCalTorque_Click"/>
-                            
-                            <Button Name="BtnTareTorqueBack" Content="7. Tare Back Torque" Height="25" Margin="0,0,0,2" IsEnabled="False" Click="BtnTareTorqueBack_Click"/>
-                            <Button Name="BtnCalTorqueBack" Content="8. Calibrate Back Torque" Height="25" Margin="0,0,0,10" IsEnabled="False" Click="BtnCalTorqueBack_Click"/>
-
-                            <Button Name="BtnFinishCalCRP" Content="Finish Calibration" Height="30" Margin="0,0,0,15" IsEnabled="False" Click="BtnFinishCal_Click"/>
-
-                            <Separator Background="Gray" Margin="0,0,0,15"/>
-
                             <TextBlock Text="System Control" FontWeight="Bold" Margin="0,0,0,10"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <CheckBox Name="ChkActivateCRP" Content="Activate System" VerticalAlignment="Center" Checked="ChkActivateCRP_Checked" Unchecked="ChkActivateCRP_Unchecked"/>
                                 <TextBlock Name="TxtTimerCRP" Text="Time: 00:00:00.000" FontWeight="SemiBold" VerticalAlignment="Center" Margin="15,0,0,0"/>
                             </StackPanel>
+                            <Button Name="BtnTareCRPTab" Content="Tare All Load Cells" Height="25" Margin="0,0,0,6" IsEnabled="False" Click="BtnTareCRPTab_Click"/>
+                            <Button Name="BtnResetViewCRP" Content="Reset Graph Views" Height="25" Margin="0,0,0,10" Click="BtnResetGraphViews_Click"/>
 
                             <Separator Background="Gray" Margin="0,0,0,15"/>
 
                             <TextBlock Text="Manual Control" FontWeight="Bold" Margin="0,0,0,10"/>
-                            
                             <TextBlock Text="Target Front Throttle (%)" Margin="0,0,0,2"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <Slider Name="SldThrottleFrontCRP" Width="140" Minimum="0" Maximum="100" Value="0" IsEnabled="False" VerticalAlignment="Center" ValueChanged="SldThrottleFrontCRP_ValueChanged" TickFrequency="5" IsSnapToTickEnabled="True" LargeChange="10" SmallChange="5" IsMoveToPointEnabled="False">
@@ -421,12 +413,12 @@
                             <TextBlock Text="Automatic Control" FontWeight="Bold" Margin="0,0,0,10"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                 <TextBlock Text="Step Duration (s): " VerticalAlignment="Center"/>
-                                <TextBox Name="TxtStepDurationCRP" Text="2.0" Width="40" TextAlignment="Center" LostFocus="TxtStepDuration_LostFocus"/>
+                                <TextBox Name="TxtStepDurationCRP" Text="10.0" Width="40" TextAlignment="Center" LostFocus="TxtStepDuration_LostFocus"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <TextBlock Text="Number of Steps: " VerticalAlignment="Center"/>
-                                <Slider Name="SldAutoStepsCRP" Width="80" Minimum="2" Maximum="6" Value="5" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SldAutoStepsCRP_ValueChanged" VerticalAlignment="Center" Margin="5,0"/>
-                                <TextBlock Name="TxtAutoStepsCRP" Text="5" VerticalAlignment="Center" Width="20"/>
+                                <Slider Name="SldAutoStepsCRP" Width="80" Minimum="2" Maximum="6" Value="6" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SldAutoStepsCRP_ValueChanged" VerticalAlignment="Center" Margin="5,0"/>
+                                <TextBlock Name="TxtAutoStepsCRP" Text="6" VerticalAlignment="Center" Width="20"/>
                                 <Button Name="BtnResetAutoCRP" Content="Reset" Width="50" Height="22" Margin="10,0,0,0" Click="BtnResetAutoCRP_Click"/>
                             </StackPanel>
                             
@@ -437,7 +429,7 @@
                                 <TextBox Name="TxtAutoFrontCRP3" Text="30" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoFrontCRP4" Text="40" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoFrontCRP5" Text="50" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
-                                <TextBox Name="TxtAutoFrontCRP6" Text="60" Width="35" TextAlignment="Center" Visibility="Collapsed"/>
+                                <TextBox Name="TxtAutoFrontCRP6" Text="60" Width="35" TextAlignment="Center" Visibility="Visible"/>
                             </StackPanel>
 
                             <TextBlock Text="Back Targets (%)" Margin="0,0,0,2"/>
@@ -447,7 +439,7 @@
                                 <TextBox Name="TxtAutoBackCRP3" Text="30" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoBackCRP4" Text="40" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox Name="TxtAutoBackCRP5" Text="50" Width="35" TextAlignment="Center" Margin="0,0,5,0"/>
-                                <TextBox Name="TxtAutoBackCRP6" Text="60" Width="35" TextAlignment="Center" Visibility="Collapsed"/>
+                                <TextBox Name="TxtAutoBackCRP6" Text="60" Width="35" TextAlignment="Center" Visibility="Visible"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <Button Name="BtnStartAutoCRP" Content="Start Automatic Test" Height="30" Padding="10,0" IsEnabled="False" Click="BtnStartAutoCRP_Click"/>
@@ -478,6 +470,206 @@
                 </Grid>
             </TabItem>
 
+            <!-- 3. Dedicated Calibration Tab -->
+            <TabItem Name="TabCalibration" Header="Calibration">
+                <Grid Margin="15,10,15,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Top Bar: Mode Selection, 3 Weights (g), and Session Controls -->
+                    <Border Grid.Row="0" Background="{DynamicResource ControlBg}" BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="12,10" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Row 0: Setup Mode, 3 Weights, and Start/Save/Tare Buttons -->
+                            <WrapPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
+                                <TextBlock Text="Calibration Mode:" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <ComboBox Name="CmbCalMode" Width="210" VerticalAlignment="Center" Margin="0,0,18,0" SelectionChanged="CmbCalMode_SelectionChanged">
+                                    <ComboBoxItem Content="Single Setup (Front Only)" IsSelected="True"/>
+                                    <ComboBoxItem Content="CRP Setup (Front &amp; Back)"/>
+                                </ComboBox>
+
+                                <TextBlock Text="1st Weight (g):" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <TextBox Name="TxtCalWeight1" Text="176" Width="55" TextAlignment="Center" VerticalAlignment="Center" Margin="0,0,12,0"
+                                         TextChanged="TxtCalWeight_TextChanged" LostFocus="TxtCalWeight_LostFocus" KeyDown="TxtCalWeight_KeyDown"/>
+
+                                <TextBlock Text="2nd Weight (g):" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <TextBox Name="TxtCalWeight2" Text="402.06" Width="60" TextAlignment="Center" VerticalAlignment="Center" Margin="0,0,12,0"
+                                         TextChanged="TxtCalWeight_TextChanged" LostFocus="TxtCalWeight_LostFocus" KeyDown="TxtCalWeight_KeyDown"/>
+
+                                <TextBlock Text="3rd Weight (g):" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <TextBox Name="TxtCalWeight3" Text="1000" Width="55" TextAlignment="Center" VerticalAlignment="Center" Margin="0,0,18,0"
+                                         TextChanged="TxtCalWeight_TextChanged" LostFocus="TxtCalWeight_LostFocus" KeyDown="TxtCalWeight_KeyDown"/>
+
+                                <Button Name="BtnStartCal" Content="Start Single Calibration" Height="30" Padding="12,0" FontWeight="SemiBold" Margin="0,0,10,0" IsEnabled="False" Click="BtnStartCal_Click"/>
+                                <Button Name="BtnFinishCal" Content="Finish &amp; Save Single Calibration" Height="30" Padding="12,0" FontWeight="SemiBold" Margin="0,0,10,0" IsEnabled="False" Click="BtnFinishCal_Click"/>
+                                <Button Name="BtnPostCalTareAll" Content="Tare All Load Cells" Height="30" Padding="12,0" IsEnabled="False" Click="BtnPostCalTareAll_Click"/>
+                            </WrapPanel>
+
+                            <!-- Row 1: Target Thrust & Torque Summary for All 3 Weights -->
+                            <StackPanel Grid.Row="1" Orientation="Horizontal">
+                                <TextBlock Name="TxtCalTargetThrust" Text="Target Thrusts: 1.726 N / 3.943 N / 9.807 N" FontWeight="Bold" Foreground="#005A9E" FontSize="12.5" Margin="0,0,25,0"/>
+                                <TextBlock Name="TxtCalTargetTorque" Text="Target Torques: 0.2589 Nm / 0.5914 Nm / 1.4710 Nm" FontWeight="Bold" Foreground="#005A9E" FontSize="12.5"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Main Calibration Dashboard: 3 Columns -->
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="380"/>
+                            <ColumnDefinition Width="380"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Column 1: Step 1 - Thrust Calibration -->
+                        <Border Grid.Column="0" Background="{DynamicResource ControlBg}" BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="15" Margin="0,0,15,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <TextBlock Text="Step 1: Thrust Calibration (Pulley)" FontWeight="Bold" FontSize="16" Margin="0,0,0,10"/>
+
+                                    <!-- 1A. Front Stand Thrust -->
+                                    <TextBlock Text="1A. Front Stand Thrust" FontWeight="Bold" FontSize="13.5" Margin="0,0,0,6"/>
+                                    <Button Name="BtnTareThrustFront" Content="Tare Front Thrust" Height="28" Margin="0,0,0,6" IsEnabled="False" Click="BtnTareThrust_Click"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Name="BtnCalThrustFrontW1" Grid.Column="0" Content="Set 1st Weight" Height="28" Margin="0,0,4,0" IsEnabled="False" Click="BtnCalThrustFrontW1_Click"/>
+                                        <Button Name="BtnCalThrustFrontW2" Grid.Column="1" Content="Set 2nd Weight" Height="28" Margin="2,0,2,0" IsEnabled="False" Click="BtnCalThrustFrontW2_Click"/>
+                                        <Button Name="BtnCalThrustFrontW3" Grid.Column="2" Content="Set 3rd Weight" Height="28" Margin="4,0,0,0" IsEnabled="False" Click="BtnCalThrustFrontW3_Click"/>
+                                    </Grid>
+                                    <TextBlock Name="TxtCalLiveThrust1" Text="Front Thrust: 0.000 N (0.000 kgf)" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                    <TextBlock Name="TxtCalScaleT1" Text="Knots: (1726 -> 1.73), (3943 -> 3.94), (9807 -> 9.81)" FontSize="11.5" Foreground="Gray" Margin="0,0,0,12"/>
+
+                                    <!-- 1B. Back Stand Thrust (Hidden when Single Setup is selected) -->
+                                    <StackPanel Name="PanelCalBackThrust" Visibility="Collapsed">
+                                        <Separator Background="Gray" Margin="0,0,0,12"/>
+                                        <TextBlock Text="1B. Back Stand Thrust (CRP Mode)" FontWeight="Bold" FontSize="13.5" Margin="0,0,0,6"/>
+                                        <Button Name="BtnTareThrustBack" Content="Tare Back Thrust" Height="28" Margin="0,0,0,6" IsEnabled="False" Click="BtnTareThrustBack_Click"/>
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Name="BtnCalThrustBackW1" Grid.Column="0" Content="Set 1st Weight" Height="28" Margin="0,0,4,0" IsEnabled="False" Click="BtnCalThrustBackW1_Click"/>
+                                            <Button Name="BtnCalThrustBackW2" Grid.Column="1" Content="Set 2nd Weight" Height="28" Margin="2,0,2,0" IsEnabled="False" Click="BtnCalThrustBackW2_Click"/>
+                                            <Button Name="BtnCalThrustBackW3" Grid.Column="2" Content="Set 3rd Weight" Height="28" Margin="4,0,0,0" IsEnabled="False" Click="BtnCalThrustBackW3_Click"/>
+                                        </Grid>
+                                        <TextBlock Name="TxtCalLiveThrust2" Text="Back Thrust: 0.000 N (0.000 kgf)" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Name="TxtCalScaleT2" Text="Knots: (1726 -> 1.73), (3943 -> 3.94), (9807 -> 9.81)" FontSize="11.5" Foreground="Gray" Margin="0,0,0,15"/>
+                                    </StackPanel>
+
+                                    <Button Name="BtnOpenSingleCalFolder" Content="Open Single Calibrations Folder" Height="28" Click="BtnOpenSingleCalFolder_Click"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+
+                        <!-- Column 2: Step 2 - Torque Calibration -->
+                        <Border Grid.Column="1" Background="{DynamicResource ControlBg}" BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="15" Margin="0,0,15,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <TextBlock Text="Step 2: Torque Calibration (150mm Arm)" FontWeight="Bold" FontSize="16" Margin="0,0,0,10"/>
+
+                                    <!-- 2A. Front Stand Torque -->
+                                    <TextBlock Text="2A. Front Stand Torque" FontWeight="Bold" FontSize="13.5" Margin="0,0,0,6"/>
+                                    <Button Name="BtnTareTorqueFront" Content="Tare Front Torque" Height="28" Margin="0,0,0,6" IsEnabled="False" Click="BtnTareTorque_Click"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Name="BtnCalTorqueFrontW1" Grid.Column="0" Content="Set 1st Weight" Height="28" Margin="0,0,4,0" IsEnabled="False" Click="BtnCalTorqueFrontW1_Click"/>
+                                        <Button Name="BtnCalTorqueFrontW2" Grid.Column="1" Content="Set 2nd Weight" Height="28" Margin="2,0,2,0" IsEnabled="False" Click="BtnCalTorqueFrontW2_Click"/>
+                                        <Button Name="BtnCalTorqueFrontW3" Grid.Column="2" Content="Set 3rd Weight" Height="28" Margin="4,0,0,0" IsEnabled="False" Click="BtnCalTorqueFrontW3_Click"/>
+                                    </Grid>
+                                    <TextBlock Name="TxtCalLiveTorque1" Text="Front Torque: 0.0000 Nm" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                    <TextBlock Name="TxtCalScaleQ1" Text="Knots: (1726 -> 0.26), (3943 -> 0.59), (9807 -> 1.47)" FontSize="11.5" Foreground="Gray" Margin="0,0,0,12"/>
+
+                                    <!-- 2B. Back Stand Torque (Hidden when Single Setup is selected) -->
+                                    <StackPanel Name="PanelCalBackTorque" Visibility="Collapsed">
+                                        <Separator Background="Gray" Margin="0,0,0,12"/>
+                                        <TextBlock Text="2B. Back Stand Torque (CRP Mode)" FontWeight="Bold" FontSize="13.5" Margin="0,0,0,6"/>
+                                        <Button Name="BtnTareTorqueBack" Content="Tare Back Torque" Height="28" Margin="0,0,0,6" IsEnabled="False" Click="BtnTareTorqueBack_Click"/>
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Name="BtnCalTorqueBackW1" Grid.Column="0" Content="Set 1st Weight" Height="28" Margin="0,0,4,0" IsEnabled="False" Click="BtnCalTorqueBackW1_Click"/>
+                                            <Button Name="BtnCalTorqueBackW2" Grid.Column="1" Content="Set 2nd Weight" Height="28" Margin="2,0,2,0" IsEnabled="False" Click="BtnCalTorqueBackW2_Click"/>
+                                            <Button Name="BtnCalTorqueBackW3" Grid.Column="2" Content="Set 3rd Weight" Height="28" Margin="4,0,0,0" IsEnabled="False" Click="BtnCalTorqueBackW3_Click"/>
+                                        </Grid>
+                                        <TextBlock Name="TxtCalLiveTorque2" Text="Back Torque: 0.0000 Nm" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Name="TxtCalScaleQ2" Text="Knots: (1726 -> 0.26), (3943 -> 0.59), (9807 -> 1.47)" FontSize="11.5" Foreground="Gray" Margin="0,0,0,15"/>
+                                    </StackPanel>
+
+                                    <Button Name="BtnOpenCRPCalFolder" Content="Open CRP Calibrations Folder" Height="28" Click="BtnOpenCRPCalFolder_Click"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+
+                        <!-- Column 3: Dynamic Step-by-Step Calibration Guide -->
+                        <Border Grid.Column="2" Background="{DynamicResource ControlBg}" BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="15">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <!-- CRP Setup Guide -->
+                                    <StackPanel Name="PanelGuideCRP" Visibility="Collapsed">
+                                        <TextBlock Text="CRP Calibration Procedure Guide" FontWeight="Bold" FontSize="16" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="1. Preparation:" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Only have the motor mounts attached to the system with nothing mounted on them. Verify your 3 calibration weights above and click 'Start CRP Calibration'." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="2. Front Thrust Calibration (Step 1A):" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Attach the pulley brackets to the front stand string while aligning the top of the pulley horizontally with the centre of the front motor mount (keep it attached for both front and back thrust calibrations). Click 'Tare Front Thrust'. Loop the string around the front motor mount's centre, place the string horizontally over the pulley and vertically down, and bind the 1st weight to the end of the string. Press 'Set 1st Weight' under Front Stand Thrust. Remove the 1st weight and repeat with the 2nd and 3rd weights." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="3. Back Thrust Calibration (Step 1B):" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Keep the pulley brackets attached to the front stand. Click 'Tare Back Thrust'. Loop the string around the back motor mount's centre, place it horizontally over the pulley and vertically down, and repeat 'Set 1st Weight', 'Set 2nd Weight', and 'Set 3rd Weight' under Back Stand Thrust." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="4. Front Torque Calibration (Step 2A):" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Remove the thrust pulley brackets and attach the 150mm torque calibration arm to the front motor mount. Click 'Tare Front Torque', then hang the 1st, 2nd, and 3rd weights in sequence while clicking 'Set 1st Weight', 'Set 2nd Weight', and 'Set 3rd Weight' under Front Stand Torque." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="5. Back Torque Calibration (Step 2B):" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Remove the calibration arm from the front motor mount and attach it to the back motor mount. Click 'Tare Back Torque', then hang the 1st, 2nd, and 3rd weights in sequence while clicking 'Set 1st Weight', 'Set 2nd Weight', and 'Set 3rd Weight' under Back Stand Torque." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="6. Save &amp; Zero Load Cells:" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Click 'Finish &amp; Save CRP Calibration'. After removing all calibration attachments and mounting your motors and propellers, click 'Tare All Load Cells' to remove any mechanical hysteresis before testing." TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <!-- Single Setup Guide -->
+                                    <StackPanel Name="PanelGuideSingle" Visibility="Visible">
+                                        <TextBlock Text="Single Setup Calibration Procedure Guide" FontWeight="Bold" FontSize="16" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="1. Preparation:" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Only have the front motor mount attached to the system with nothing mounted on it. Verify your 3 calibration weights above and click 'Start Single Calibration'." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="2. Front Thrust Calibration (Step 1A):" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Attach the pulley brackets to the front stand string while aligning the top of the pulley horizontally with the centre of the front motor mount. Click 'Tare Front Thrust'. Loop the string around the front motor mount's centre, place the string horizontally over the pulley and vertically down, and bind the 1st weight to the end of the string. Press 'Set 1st Weight' under Front Stand Thrust. Remove the 1st weight and repeat with the 2nd and 3rd weights." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="3. Front Torque Calibration (Step 2A):" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Remove the thrust pulley brackets and attach the 150mm torque calibration arm to the front motor mount. Click 'Tare Front Torque', then hang the 1st, 2nd, and 3rd weights in sequence while clicking 'Set 1st Weight', 'Set 2nd Weight', and 'Set 3rd Weight' under Front Stand Torque." TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="4. Save &amp; Zero Load Cells:" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                        <TextBlock Text="Click 'Finish &amp; Save Single Calibration'. After removing all calibration attachments and mounting your motor and propeller, click 'Tare All Load Cells' to remove any mechanical hysteresis before testing." TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <!-- 4. Test Logs Tab -->
             <TabItem Name="TabLogs" Header="Test Logs">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
@@ -505,7 +697,35 @@
                         <Button Name="BtnOpenLogsFolder" Grid.Row="2" Content="Open Folder in Explorer" Height="30" Click="BtnOpenLogsFolder_Click"/>
                     </Grid>
                     
-                    <DataGrid Name="DataGridLogs" Grid.Column="1" AutoGenerateColumns="True" IsReadOnly="True" Margin="1"/>
+                    <DataGrid Name="DataGridLogs" Grid.Column="1" AutoGenerateColumns="False" IsReadOnly="True" Margin="1"
+                              HeadersVisibility="Column" GridLinesVisibility="All" RowHeight="22" ColumnHeaderHeight="28"
+                              EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                              VirtualizingPanel.ScrollUnit="Item" ScrollViewer.CanContentScroll="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="95"/>
+                            <DataGridTextColumn Header="Thrust1" Binding="{Binding Thrust1}" Width="70"/>
+                            <DataGridTextColumn Header="Torque1" Binding="{Binding Torque1}" Width="70"/>
+                            <DataGridTextColumn Header="RPM1" Binding="{Binding RPM1}" Width="65"/>
+                            <DataGridTextColumn Header="Voltage1" Binding="{Binding Voltage1}" Width="70"/>
+                            <DataGridTextColumn Header="Current1" Binding="{Binding Current1}" Width="70"/>
+                            <DataGridTextColumn Header="Throttle1" Binding="{Binding Throttle1}" Width="70"/>
+                            <DataGridTextColumn Header="ElecPower1" Binding="{Binding ElecPower1}" Width="82"/>
+                            <DataGridTextColumn Header="MechPower1" Binding="{Binding MechPower1}" Width="85"/>
+                            <DataGridTextColumn Header="MotorEff1" Binding="{Binding MotorEff1}" Width="75"/>
+                            <DataGridTextColumn Header="PropEff1" Binding="{Binding PropEff1}" Width="75"/>
+                            <DataGridTextColumn Header="Thrust2" Binding="{Binding Thrust2}" Width="70"/>
+                            <DataGridTextColumn Header="Torque2" Binding="{Binding Torque2}" Width="70"/>
+                            <DataGridTextColumn Header="RPM2" Binding="{Binding RPM2}" Width="65"/>
+                            <DataGridTextColumn Header="Voltage2" Binding="{Binding Voltage2}" Width="70"/>
+                            <DataGridTextColumn Header="Current2" Binding="{Binding Current2}" Width="70"/>
+                            <DataGridTextColumn Header="Throttle2" Binding="{Binding Throttle2}" Width="70"/>
+                            <DataGridTextColumn Header="ElecPower2" Binding="{Binding ElecPower2}" Width="82"/>
+                            <DataGridTextColumn Header="MechPower2" Binding="{Binding MechPower2}" Width="85"/>
+                            <DataGridTextColumn Header="MotorEff2" Binding="{Binding MotorEff2}" Width="75"/>
+                            <DataGridTextColumn Header="PropEff2" Binding="{Binding PropEff2}" Width="75"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
                 </Grid>
             </TabItem>
         </TabControl>
