@@ -36,9 +36,9 @@
         "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\cores\\arduino",
         "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\variants\\standard",
         "-IC:\\Users\\Uys Cronje\\AppData\\Local\\Arduino15\\internal\\arduino_avr_1.8.8_a345a73f10f468fe\\libraries\\Wire\\src",
-        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerCode\\build\\build_Arduino-Uno-R3\\sketch\\Servo.cpp",
+        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerCode\\build\\build_Arduino-Uno-R3\\sketch\\DynamometerCode.ino.cpp",
         "-o",
-        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerCode\\build\\build_Arduino-Uno-R3\\sketch\\Servo.cpp.o"
+        "S:\\Documents\\1_Education\\BEng (Mechatronics) @ SU\\Y4S2\\4_Mechatronic Project 478 - Skripsie\\1_26894874_Cronje\\10_Software\\Dynamometer Code\\DynamometerCode\\build\\build_Arduino-Uno-R3\\sketch\\DynamometerCode.ino.cpp.o"
       ],
       "defines": [
         "F_CPU=16000000L",
